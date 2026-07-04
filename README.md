@@ -56,6 +56,10 @@
 
 ## 🚀 快速开始
 
+部署共 4 步：克隆 → 配置 IPv6（可选） → 配置反代 → 启动。
+
+---
+
 ### 1️⃣ 克隆仓库
 
 ```bash
@@ -63,33 +67,87 @@ git clone https://github.com/xvzu/nexus-terminal.git
 cd nexus-terminal
 ```
 
+目录结构：
+```
+nexus-terminal/
+├── docker-compose.yml       # 容器编排，已配置构建上下文和 IPv6 网络
+├── .env                     # 环境变量（如 RP_ID、数据库等）
+├── scripts/
+│   └── setup-docker-ipv6.sh # Docker IPv6 一键配置脚本
+└── packages/
+    ├── backend/             # Node.js 后端（SSH/SFTP/WebSocket）
+    ├── frontend/            # Vue 前端 + 内部 nginx
+    └── remote-gateway/      # RDP/VNC 网关
+```
 
+---
 
 ### 2️⃣ 配置 Docker IPv6（可选）
 
-如需通过容器连接 IPv6 服务器，只需执行一次：
+如果你需要通过容器 **连接 IPv6 服务器**（比如 SSH 到 IPv6 地址），才需要这一步。
+
+只需要在每台机器上**执行一次**：
 ```bash
 sudo ./scripts/setup-docker-ipv6.sh
 ```
 
-### 3️⃣ 配置反代
+脚本会自动完成：
+- 创建 `/etc/docker/daemon.json`（启用 IPv6）
+- 重启 Docker 守护进程
+- 清除旧网络，让 compose 重建时带上 IPv6
 
-宿主机 nginx 配置参考：
-```conf
-location / {
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header Host $http_host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header Range $http_range;
-    proxy_set_header If-Range $http_if_range;
-    proxy_redirect off;
-    proxy_pass http://127.0.0.1:18111;
+> 不需要 IPv6 连接时，直接跳过此步。
+
+---
+
+### 3️⃣ 配置宿主机反代
+
+nexus-terminal 的 frontend 容器监听宿主机 **18111** 端口。你需要用 nginx 或 caddy 反向代理到该端口。
+
+#### nginx
+
+在宿主机上新建配置文件（如 `/etc/nginx/sites-available/nexus-terminal.conf`）：
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;  # 改为你的域名
+
+    location / {
+        proxy_pass http://127.0.0.1:18111;
+
+        # WebSocket 支持（必需，否则终端无法连接）
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Range $http_range;
+        proxy_set_header If-Range $http_if_range;
+        proxy_redirect off;
+    }
 }
 ```
+
+启用并重载 nginx：
+```bash
+sudo ln -sf /etc/nginx/sites-available/nexus-terminal.conf /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+> **注意**：这是修改宿主机的 nginx 配置（`/etc/nginx/`），不是仓库里的文件。
+
+#### Caddy
+
+```caddyfile
+your-domain.com {
+    reverse_proxy 127.0.0.1:18111
+}
+```
+
+---
 
 ### 4️⃣ 构建 & 启动
 
@@ -97,13 +155,33 @@ location / {
 docker compose up -d
 ```
 
-首次运行会自动构建镜像，之后启动直接使用缓存。
+首次运行时会**自动构建镜像**（读取每个服务的 `build:` 配置，从源码编译），启动 4 个容器：
+
+| 容器 | 说明 |
+|------|------|
+| `nexus-terminal-frontend` | 前端界面（nginx, 端口 18111） |
+| `nexus-terminal-backend` | 后端服务（SSH/SFTP API, 端口 3001） |
+| `nexus-terminal-remote-gateway` | RDP/VNC 网关 |
+| `nexus-terminal-guacd` | Guacamole 代理 |
+
+验证是否正常运行：
+```bash
+docker compose ps
+# 所有容器应为 "Up" 状态
+```
+
+浏览器访问 `http://your-domain.com`，注册第一个账号即可使用。
+
+> 首次注册的账号会自动成为管理员。
+
+---
 
 ### 更新
 
 ```bash
-git pull
-docker compose up -d --build
+cd nexus-terminal
+git pull                          # 拉取最新代码
+docker compose up -d --build      # 重新构建并启动（--build 强制重新编译）
 ```
 ## 📚 使用指南
 
