@@ -1678,17 +1678,6 @@ const handleOpenEditorClick = () => {
         <div class="flex items-center gap-2 flex-shrink-0">
           <input type="file" ref="fileInputRef" @change="handleFileSelected" multiple class="hidden" />
           <button
-            v-if="showPopupFileEditorBoolean"
-            @click="openPopupEditor"
-            :disabled="!currentSftpManager || !props.wsDeps.isConnected.value"
-            :title="t('fileManager.actions.openEditor', 'Open Popup Editor')"
-            class="flex items-center gap-1 px-2.5 py-1 bg-background border border-border rounded text-foreground text-xs transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-header hover:enabled:border-primary hover:enabled:text-primary"
-            :class="{ 'px-1.5': props.isMobile }"
-          >
-            <i class="far fa-edit text-sm"></i>
-            <span v-if="!props.isMobile">{{ t('fileManager.actions.openEditor', 'Open Editor') }}</span>
-          </button>
-          <button
             v-if="props.isMobile"
             @click="toggleMultiSelectMode"
             :title="isMultiSelectMode ? t('fileManager.actions.exitMultiSelect', 'Exit Multi-Select Mode') : t('fileManager.actions.multiSelect', 'Enter Multi-Select Mode')"
