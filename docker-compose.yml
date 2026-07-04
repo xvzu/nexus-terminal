@@ -13,6 +13,11 @@ services:
     networks:
       - nexus-terminal-network
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: 3
 
   backend:
     image: xvzu/nexus-terminal-backend:latest
@@ -30,6 +35,17 @@ services:
     networks:
       - nexus-terminal-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/v1/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: 3
 
   remote-gateway:
     image: xvzu/nexus-terminal-remote-gateway:latest
@@ -53,6 +69,11 @@ services:
         condition: service_healthy
       backend:
         condition: service_started
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: 3
 
   guacd:
     image: guacamole/guacd:latest
@@ -66,6 +87,11 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: 3
 
 networks:
   nexus-terminal-network:

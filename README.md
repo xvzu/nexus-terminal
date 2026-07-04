@@ -56,7 +56,7 @@
 
 ## 🚀 快速开始
 
-部署共 4 步：克隆 → 配置 IPv6（可选） → 配置反代 → 启动。
+部署共 7 步：克隆 → 环境变量 → IPv6（可选） → 反代 → 启动。
 
 ---
 
@@ -65,13 +65,20 @@
 ```bash
 git clone https://github.com/xvzu/nexus-terminal.git
 cd nexus-terminal
+
+# 创建数据目录（存储数据库、会话文件等）
+mkdir -p ./data
 ```
+
+> **注意**：`data/` 目录用于持久化存储（SQLite 数据库、session 文件、自动生成的密钥等），请定期备份。
 
 目录结构：
 ```
 nexus-terminal/
 ├── docker-compose.yml       # 容器编排，已配置构建上下文和 IPv6 网络
-├── .env                     # 环境变量（如 RP_ID、数据库等）
+├── .env                     # 环境变量配置
+├── .env.example             # 环境变量示例（含注释说明）
+├── data/                    # 数据持久化目录（数据库、密钥等）
 ├── scripts/
 │   └── setup-docker-ipv6.sh # Docker IPv6 一键配置脚本
 └── packages/
@@ -82,7 +89,27 @@ nexus-terminal/
 
 ---
 
-### 2️⃣ 配置 Docker IPv6（可选）
+### 2️⃣ 配置环境变量
+
+参考 `.env.example` 创建 `.env`（如已存在则跳过）：
+```bash
+cp -n .env.example .env
+```
+
+关键变量说明：
+
+| 变量 | 是否必改 | 说明 |
+|------|----------|------|
+| `RP_ID` | 如需 Passkey 登录 | 你的域名，如 `example.com` |
+| `RP_ORIGIN` | 如需 Passkey 登录 | 你的完整前端地址，如 `https://example.com` |
+
+> 不需要 Passkey 时可以保持默认，不影响 SSH/SFTP/RDP 等核心功能。
+>
+> `ENCRYPTION_KEY` 和 `SESSION_SECRET` 会在首次启动时**自动生成**并保存到 `data/.env`，请备份该文件。
+
+---
+
+### 3️⃣ 配置 Docker IPv6（可选）
 
 如果你需要通过容器 **连接 IPv6 服务器**（比如 SSH 到 IPv6 地址），才需要这一步。
 
@@ -100,7 +127,7 @@ sudo ./scripts/setup-docker-ipv6.sh
 
 ---
 
-### 3️⃣ 配置宿主机反代
+### 6️⃣ 配置宿主机反代
 
 nexus-terminal 的 frontend 容器监听宿主机 **18111** 端口。你需要用 nginx 或 caddy 反向代理到该端口。
 
@@ -149,7 +176,7 @@ your-domain.com {
 
 ---
 
-### 4️⃣ 构建 & 启动
+### 7️⃣ 构建 & 启动
 
 ```bash
 docker compose up -d
