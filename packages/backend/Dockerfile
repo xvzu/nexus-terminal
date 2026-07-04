@@ -37,7 +37,7 @@ COPY --from=builder /app/packages/backend/html-presets ./html-presets
 
 COPY packages/backend/package.json ./package.json
 COPY package-lock.json ./package-lock.json
-RUN npm install --omit=dev --prefer-offline
+RUN npm install --omit=dev --no-audit --no-fund --loglevel=error
 
 
 RUN apk del .build-deps
