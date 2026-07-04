@@ -12,6 +12,7 @@ services:
       - remote-gateway
     networks:
       - nexus-terminal-network
+    restart: unless-stopped
 
   backend:
     image: xvzu/nexus-terminal-backend:latest
