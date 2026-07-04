@@ -63,6 +63,11 @@ export function initializeConnectionHandler(wss: WebSocketServer, sshSuspendServ
         } else {
             // Standard SSH/SFTP/Docker connection
             ws.on('message', async (message: RawData) => {
+                if (!ws.authenticated) {
+                    console.warn(`WebSocket：来自 ${ws.username} 的未认证消息被拒绝`);
+                    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'error', payload: '未认证' }));
+                    return;
+                }
                 let parsedMessage: any;
                 try {
                     parsedMessage = JSON.parse(message.toString());

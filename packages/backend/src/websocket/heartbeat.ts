@@ -2,7 +2,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { AuthenticatedWebSocket } from './types';
 import { cleanupClientConnection } from './utils';
 
-const HEARTBEAT_INTERVAL_MS = 5000; // 保持原始的心跳间隔
+const HEARTBEAT_INTERVAL_MS = 30000; // 30秒心跳间隔
 
 export function initializeHeartbeat(wss: WebSocketServer): NodeJS.Timeout {
     const heartbeatInterval = setInterval(() => {

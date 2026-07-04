@@ -22,6 +22,7 @@ services:
       - ./data:/app/data
     networks:
       - nexus-terminal-network
+    restart: unless-stopped
 
   remote-gateway:
     image: heavrnl/nexus-terminal-remote-gateway:latest
@@ -36,9 +37,12 @@ services:
       NODE_ENV: production
     networks:
       - nexus-terminal-network
+    restart: unless-stopped
     depends_on:
-      - guacd
-      - backend
+      guacd:
+        condition: service_healthy
+      backend:
+        condition: service_started
 
   guacd:
     image: guacamole/guacd:latest
@@ -46,6 +50,12 @@ services:
     networks:
       - nexus-terminal-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "echo", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 networks:
   nexus-terminal-network:
@@ -54,5 +64,5 @@ networks:
     enable_ipv6: true
     ipam:
       config:
-        - subnet: fd01::/80    
-          gateway: fd01::1    
+        - subnet: fd01::/64
+          gateway: fd01::1

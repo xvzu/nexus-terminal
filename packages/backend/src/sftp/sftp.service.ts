@@ -489,80 +489,23 @@ export class SftpService {
         }
     }
 
-    /** 删除目录 (强制递归) */
+    /** 删除目录 (递归, 使用 SFTP API 而非 shell exec) */
     async rmdir(sessionId: string, path: string, requestId: string): Promise<void> {
         const state = this.clientStates.get(sessionId);
-        if (!state || !state.sshClient) { 
-            console.warn(`[SSH Exec] SSH 客户端未准备好，无法在 ${sessionId} 上执行 rmdir (ID: ${requestId})`);
-            state?.ws.send(JSON.stringify({ type: 'sftp:rmdir:error', path: path, payload: 'SSH 会话未就绪', requestId: requestId }));
+        if (!state || !state.sftp) {
+            console.warn(`[SFTP] SFTP 未准备好，无法在 ${sessionId} 上执行 rmdir (ID: ${requestId})`);
+            state?.ws.send(JSON.stringify({ type: 'sftp:rmdir:error', path: path, payload: 'SFTP 会话未就绪', requestId: requestId }));
             return;
         }
-        console.debug(`[SSH Exec ${sessionId}] Received rmdir request for ${path} (ID: ${requestId})`);
-
-        // 第一种方案：尝试 rm -rf 命令
-        const tryRmRfCommand = async (isSudo: boolean) => {
-            const commandPrefix = isSudo ? 'sudo ' : '';
-            const command = `${commandPrefix}rm -rf "${path.replace(/"/g, '\\"')}"`;
-            const attemptDescription = isSudo ? 'sudo rm -rf' : 'rm -rf';
-
-            console.log(`[SSH Exec ${sessionId}] 尝试使用 ${attemptDescription} 命令删除 ${path} (ID: ${requestId})`);
-            console.log(`[SSH Exec ${sessionId}] Executing command: ${command} (ID: ${requestId})`);
-
-            try {
-                state.sshClient.exec(command, (err, stream) => {
-                    if (err) {
-                        console.error(`[SSH Exec ${sessionId}] Failed to start exec for ${attemptDescription} ${path} (ID: ${requestId}):`, err);
-                        if (!isSudo) {
-                            // 如果普通 rm -rf 失败，尝试 sudo rm -rf
-                            tryRmRfCommand(true);
-                        } else {
-                            // 如果 sudo rm -rf 也失败
-                            state.ws.send(JSON.stringify({ type: 'sftp:rmdir:error', path: path, payload: `删除目录失败: ${attemptDescription} 命令执行失败: ${err.message}`, requestId: requestId }));
-                        }
-                        return;
-                    }
-
-                    let stderrOutput = '';
-                    stream.stderr.on('data', (data: Buffer) => {
-                        stderrOutput += data.toString();
-                    });
-
-                    stream.on('close', (code: number | null, signal: string | null) => {
-                        if (code === 0) {
-                            console.log(`[SSH Exec ${sessionId}] ${attemptDescription} ${path} command executed successfully (ID: ${requestId})`);
-                            state.ws.send(JSON.stringify({ type: 'sftp:rmdir:success', path: path, requestId: requestId }));
-                        } else {
-                            const errorMessage = stderrOutput.trim() || `命令退出，代码: ${code ?? 'N/A'}${signal ? `, 信号: ${signal}` : ''}`;
-                            console.error(`[SSH Exec ${sessionId}] ${attemptDescription} ${path} command failed (ID: ${requestId}). Code: ${code}, Signal: ${signal}, Stderr: ${errorMessage}`);
-                            if (!isSudo) {
-                                // 如果普通 rm -rf 失败，尝试 sudo rm -rf
-                                console.log(`[SSH Exec ${sessionId}] 普通 rm -rf 失败，错误: ${errorMessage}。尝试 sudo rm -rf。`);
-                                tryRmRfCommand(true);
-                            } else {
-                                // 如果 sudo rm -rf 也失败
-                                state.ws.send(JSON.stringify({ type: 'sftp:rmdir:error', path: path, payload: `删除目录失败: 普通 rm -rf 和 sudo rm -rf 命令均失败。最后错误: ${errorMessage}`, requestId: requestId }));
-                            }
-                        }
-                    });
-
-                    stream.on('data', (data: Buffer) => {
-                        console.debug(`[SSH Exec ${sessionId}] ${attemptDescription} stdout (ID: ${requestId}): ${data.toString()}`);
-                    });
-                });
-            } catch (error: any) {
-                console.error(`[SSH Exec ${sessionId}] ${attemptDescription} ${path} caught unexpected error during exec setup (ID: ${requestId}):`, error);
-                if (!isSudo) {
-                     // 如果普通 rm -rf 期间发生意外错误，尝试 sudo rm -rf
-                    console.log(`[SSH Exec ${sessionId}] 普通 rm -rf 发生意外错误。尝试 sudo rm -rf。`);
-                    tryRmRfCommand(true);
-                } else {
-                    state.ws.send(JSON.stringify({ type: 'sftp:rmdir:error', path: path, payload: `删除目录失败: ${attemptDescription} 执行时发生意外错误: ${error.message}`, requestId: requestId }));
-                }
-            }
-        };
-
-        // 首先尝试不带 sudo 的 rm -rf
-        tryRmRfCommand(false);
+        console.debug(`[SFTP ${sessionId}] Received rmdir request for ${path} (ID: ${requestId})`);
+        try {
+            await this.removeDirectoryRecursive(state.sftp, path);
+            console.log(`[SFTP ${sessionId}] rmdir ${path} success (ID: ${requestId})`);
+            state.ws.send(JSON.stringify({ type: 'sftp:rmdir:success', path: path, requestId: requestId }));
+        } catch (error: any) {
+            console.error(`[SFTP ${sessionId}] rmdir ${path} failed (ID: ${requestId}):`, error);
+            state.ws.send(JSON.stringify({ type: 'sftp:rmdir:error', path: path, payload: `删除目录失败: ${error.message}`, requestId: requestId }));
+        }
     }
 
     /** 删除文件 */
@@ -1098,6 +1041,28 @@ export class SftpService {
         };
     }
 
+    private async removeDirectoryRecursive(sftp: SFTPWrapper, dirPath: string): Promise<void> {
+        const items = await this.listDirectory(sftp, dirPath);
+        for (const item of items) {
+            const childPath = pathModule.posix.join(dirPath, item.filename);
+            if (item.attrs.isDirectory()) {
+                await this.removeDirectoryRecursive(sftp, childPath);
+            } else {
+                await new Promise<void>((resolve, reject) => {
+                    sftp.unlink(childPath, (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+                });
+            }
+        }
+        await new Promise<void>((resolve, reject) => {
+            sftp.rmdir(dirPath, (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+    }
 
     // --- Compress/Decompress Methods ---
 /**
