@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, onBeforeUnmount, nextTick, type PropType } from 'vue';
+import { ref, onMounted, watch, onBeforeUnmount, nextTick, type PropType } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useFavoritePathsStore, type FavoritePathItem } from '../stores/favoritePaths.store';
 import { useSessionStore } from '../stores/session.store';
+import { useUiNotificationsStore } from '../stores/uiNotifications.store';
 import AddEditFavoritePathForm from './AddEditFavoritePathForm.vue';
 import { useWorkspaceEventEmitter } from '../composables/workspaceEvents';
 import { useConfirmDialog } from '../composables/useConfirmDialog';
@@ -25,57 +26,73 @@ const emit = defineEmits(['close', 'navigateToPath']);
 const { t } = useI18n();
 const favoritePathsStore = useFavoritePathsStore();
 const sessionStore = useSessionStore();
+const uiNotificationsStore = useUiNotificationsStore();
 const emitWorkspaceEvent = useWorkspaceEventEmitter();
 const { showConfirmDialog } = useConfirmDialog();
 
-const searchTerm = ref('');
 const showAddEditModal = ref(false);
 const editingPathItem = ref<FavoritePathItem | null>(null);
 const modalContentRef = ref<HTMLElement | null>(null);
 const modalStyle = ref<Record<string, string>>({});
 
-
-const filteredPaths = computed(() => {
-  if (!searchTerm.value) {
-    return favoritePathsStore.favoritePaths;
-  }
-  const lowerSearchTerm = searchTerm.value.toLowerCase();
-  return favoritePathsStore.favoritePaths.filter(
-    (p) =>
-      p.path.toLowerCase().includes(lowerSearchTerm) ||
-      (p.name && p.name.toLowerCase().includes(lowerSearchTerm))
-  );
-});
-
-// Computed property for sort button icon and title
-const currentSortBy = computed(() => favoritePathsStore.currentSortBy);
-
-const sortButtonIcon = computed(() => {
-  return currentSortBy.value === 'name' ? 'fas fa-sort-alpha-down' : 'fas fa-clock';
-});
-
-
-
-const toggleSort = () => {
-  const newSortBy = currentSortBy.value === 'name' ? 'last_used_at' : 'name';
-  favoritePathsStore.setSortBy(newSortBy);
-};
-
-const handleItemClick = async (pathItem: FavoritePathItem) => {
-  try {
-    // Mark path as used before navigating
-    await favoritePathsStore.markPathAsUsed(pathItem.id, t);
-  } catch (error) {
-    console.error('Failed to mark path as used:', error);
-    // Optionally, inform the user about the failure, though navigation will still proceed.
-  }
-  emit('navigateToPath', pathItem.path);
-  closeModal();
-};
-
 const openAddModal = () => {
   editingPathItem.value = null;
   showAddEditModal.value = true;
+};
+
+const favoriteCtxMenuVisible = ref(false);
+const favoriteCtxMenuPosition = ref({ x: 0, y: 0 });
+const favoriteCtxTarget = ref<FavoritePathItem | null>(null);
+const favoriteCtxFromBlank = ref(false);
+
+const showFavoriteContextMenu = (event: MouseEvent, pathItem: FavoritePathItem) => {
+  event.preventDefault();
+  event.stopPropagation();
+  favoriteCtxTarget.value = pathItem;
+  favoriteCtxFromBlank.value = false;
+  favoriteCtxMenuPosition.value = { x: event.clientX, y: event.clientY };
+  favoriteCtxMenuVisible.value = true;
+  document.addEventListener('click', closeFavoriteContextMenu, { once: true });
+  nextTick(() => {
+    positionCtxMenu();
+  });
+};
+
+const showBlankContextMenu = (event: MouseEvent) => {
+  event.preventDefault();
+  favoriteCtxTarget.value = null;
+  favoriteCtxFromBlank.value = true;
+  favoriteCtxMenuPosition.value = { x: event.clientX, y: event.clientY };
+  favoriteCtxMenuVisible.value = true;
+  document.addEventListener('click', closeFavoriteContextMenu, { once: true });
+  nextTick(() => {
+    positionCtxMenu();
+  });
+};
+
+const positionCtxMenu = () => {
+  const el = document.querySelector('.fav-ctx-menu') as HTMLElement;
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  let x = favoriteCtxMenuPosition.value.x;
+  let y = favoriteCtxMenuPosition.value.y;
+  if (x + r.width > window.innerWidth) x = window.innerWidth - r.width - 5;
+  if (y + r.height > window.innerHeight) y = window.innerHeight - r.height - 5;
+  x = Math.max(5, x);
+  y = Math.max(5, y);
+  if (x !== favoriteCtxMenuPosition.value.x || y !== favoriteCtxMenuPosition.value.y) {
+    favoriteCtxMenuPosition.value = { x, y };
+  }
+};
+
+const closeFavoriteContextMenu = () => {
+  favoriteCtxMenuVisible.value = false;
+  favoriteCtxTarget.value = null;
+  document.removeEventListener('click', closeFavoriteContextMenu);
+};
+
+const handleItemClick = (pathItem: FavoritePathItem) => {
+  handleSendToTerminal(pathItem);
 };
 
 const openEditModal = (pathItem: FavoritePathItem) => {
@@ -92,6 +109,7 @@ const handleDelete = async (pathItem: FavoritePathItem) => {
       await favoritePathsStore.deleteFavoritePath(pathItem.id, t);
     } catch (error) {
       console.error('Failed to delete favorite path from modal:', error);
+      uiNotificationsStore.showError(t('favoritePaths.notifications.deleteError', '删除收藏路径失败'));
     }
   }
 };
@@ -184,7 +202,6 @@ const handleClickOutside = (event: MouseEvent) => {
 
 watch(() => props.isVisible, (newValue: boolean) => {
   if (newValue) {
-    searchTerm.value = '';
     document.addEventListener('mousedown', handleClickOutside);
     nextTick(() => { // Ensure DOM is ready for measurements
       updatePosition(); // Calculate initial position
@@ -198,7 +215,6 @@ watch(() => props.isVisible, (newValue: boolean) => {
 
 onMounted(() => {
   if (props.isVisible) {
-    searchTerm.value = ''; 
     document.addEventListener('mousedown', handleClickOutside);
     nextTick(() => { 
       updatePosition();
@@ -224,80 +240,65 @@ onBeforeUnmount(() => {
       :style="modalStyle"
       class="z-50 w-72 md:w-80 rounded-md bg-background shadow-lg border border-border/50 max-h-80 flex flex-col overflow-hidden"
     >
-      <!-- Toolbar: Search and Add Button -->
-      <div class="p-2 flex-shrink-0 flex items-center gap-2">
-        <div class="relative flex-grow">
-          <input
-            type="text"
-            v-model="searchTerm"
-            :placeholder="t('favoritePaths.searchPlaceholder', 'Search by name or path...')"
-            class="w-full bg-input border border-border rounded-md pl-2.5 pr-2 py-1.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-          />
-        </div>
-        <button
-          @click="toggleSort"
-          class="flex items-center justify-center w-8 h-8 bg-background border border-border text-text-secondary rounded-lg text-sm cursor-pointer shadow-sm transition-colors duration-200 ease-in-out hover:bg-primary/10 hover:text-primary focus:outline-none flex-shrink-0"
-        >
-          <i :class="sortButtonIcon"></i>
-        </button>
-        <button
-          @click="openAddModal"
-          class="flex items-center justify-center w-8 h-8 bg-primary text-white border-none rounded-lg text-sm font-semibold cursor-pointer shadow-md transition-colors duration-200 ease-in-out hover:bg-button-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary flex-shrink-0"
-          :title="t('favoritePaths.addNew', 'Add new favorite path')"
-        >
-          <i class="fas fa-plus text-base"></i>
-        </button>
-      </div>
-
-      <!-- Path List -->
-      <div class="overflow-y-auto flex-grow p-1 text-sm">
-        <div v-if="favoritePathsStore.isLoading && filteredPaths.length === 0" class="p-3 text-center text-text-secondary">
+      <!-- Path List - Horizontal -->
+      <div class="overflow-y-auto flex-grow p-2" @contextmenu.prevent="showBlankContextMenu">
+        <div v-if="favoritePathsStore.isLoading && favoritePathsStore.favoritePaths.length === 0" class="p-3 text-center text-text-secondary text-sm">
           <i class="fas fa-spinner fa-spin mr-1"></i>
           {{ t('favoritePaths.loading', 'Loading favorites...') }}
         </div>
-        <div v-else-if="!favoritePathsStore.isLoading && filteredPaths.length === 0" class="p-3 text-center text-text-secondary">
+        <div v-else-if="!favoritePathsStore.isLoading && favoritePathsStore.favoritePaths.length === 0" class="p-3 text-center text-text-secondary text-sm">
           <i class="fas fa-star-half-alt mr-1"></i>
-          {{ searchTerm ? t('favoritePaths.noResults', 'No matching favorites found.') : t('favoritePaths.noFavorites', 'No favorite paths yet. Add one!') }}
+          {{ t('favoritePaths.noFavorites', 'No favorite paths yet.') }}
         </div>
-        <ul v-else-if="filteredPaths.length > 0" class="list-none m-0 p-0">
+        <ul v-else class="list-none p-0 m-0 flex flex-wrap content-start gap-1.5">
           <li
-            v-for="favPath in filteredPaths"
+            v-for="favPath in favoritePathsStore.favoritePaths"
             :key="favPath.id"
-            class="p-2 hover:bg-primary/10 cursor-pointer group flex items-center justify-between rounded-md transition-colors duration-150"
+            class="inline-flex rounded-md hover:bg-primary/10 transition-colors duration-150 cursor-pointer"
             @click="handleItemClick(favPath)"
+            @contextmenu.prevent.stop="showFavoriteContextMenu($event, favPath)"
             :title="favPath.path"
           >
-            <div class="flex-grow overflow-hidden mr-2">
-              <p class="font-medium truncate text-foreground">
-                {{ favPath.name || favPath.path }}
-              </p>
-              <p v-if="favPath.name" class="text-xs text-text-secondary truncate">
-                {{ favPath.path }}
-              </p>
-            </div>
-            <div class="flex-shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150">
-              <button
-                @click.stop="handleSendToTerminal(favPath)"
-                class="p-1.5 rounded text-text-secondary hover:text-primary hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
-                :title="t('favoritePaths.sendToTerminal', 'Send to Terminal')">
-                <i class="fas fa-terminal text-xs"></i>
-              </button>
-              <button
-                @click.stop="openEditModal(favPath)"
-                class="p-1.5 rounded text-text-secondary hover:text-primary hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
-                :title="t('common.edit')">
-                <i class="fas fa-pencil-alt text-xs"></i>
-              </button>
-              <button
-                @click.stop="handleDelete(favPath)"
-                class="p-1.5 rounded text-text-secondary hover:text-error hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
-                :title="t('common.delete')">
-                <i class="fas fa-trash-alt text-xs"></i>
-              </button>
-            </div>
+            <span class="font-medium truncate text-foreground hover:text-primary px-2 py-1 text-sm"
+                  :style="{ maxWidth: '200px' }">{{ favPath.name || favPath.path }}</span>
           </li>
         </ul>
       </div>
+    </div>
+
+    <!-- Context Menu for Favorites -->
+    <div
+      v-if="favoriteCtxMenuVisible"
+      class="fixed bg-background border border-border/50 shadow-xl rounded-lg py-1.5 z-[60] min-w-[160px] fav-ctx-menu"
+      :style="{ top: `${favoriteCtxMenuPosition.y}px`, left: `${favoriteCtxMenuPosition.x}px` }"
+      @click.stop
+    >
+      <ul class="list-none p-0 m-0">
+        <li
+          class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1"
+          @click="openAddModal(); closeFavoriteContextMenu()"
+        >
+          <i class="fas fa-plus mr-2 w-4 text-center"></i>
+          <span>{{ t('favoritePaths.addNew', '添加收藏') }}</span>
+        </li>
+        <li v-if="favoriteCtxTarget" class="border-t border-border/50 my-1"></li>
+        <li
+          v-if="favoriteCtxTarget"
+          class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1"
+          @click="openEditModal(favoriteCtxTarget); closeFavoriteContextMenu()"
+        >
+          <i class="fas fa-pencil-alt mr-2 w-4 text-center"></i>
+          <span>编辑收藏</span>
+        </li>
+        <li
+          v-if="favoriteCtxTarget"
+          class="group px-4 py-1.5 cursor-pointer flex items-center text-error hover:bg-error/10 text-sm transition-colors duration-150 rounded-md mx-1"
+          @click="handleDelete(favoriteCtxTarget)"
+        >
+          <i class="fas fa-trash-alt mr-2 w-4 text-center"></i>
+          <span>删除收藏</span>
+        </li>
+      </ul>
     </div>
 
     <!-- Add/Edit Modal -->

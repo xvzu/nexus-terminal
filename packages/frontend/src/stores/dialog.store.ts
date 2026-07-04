@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 interface DialogState {
@@ -37,11 +37,11 @@ export const useDialogStore = defineStore('dialog', () => {
       ...defaultState,
       ...options,
       visible: true,
-      isLoading: false, // Reset loading state
+      isLoading: false,
     };
     return new Promise((resolve, reject) => {
       state.value.resolvePromise = resolve;
-      state.value.rejectPromise = reject; // Though typically we resolve false for cancel
+      state.value.rejectPromise = reject;
     });
   };
 
@@ -50,31 +50,27 @@ export const useDialogStore = defineStore('dialog', () => {
       state.value.resolvePromise(true);
     }
     state.value.visible = false;
-    // No need to reset state here, showDialog will do it
   };
 
   const handleCancel = () => {
-    if (state.value.resolvePromise) { // Resolve with false on cancel
+    if (state.value.resolvePromise) {
       state.value.resolvePromise(false);
     }
     state.value.visible = false;
-    // No need to reset state here, showDialog will do it
   };
   
-  // For actions that might take time, to show a loading spinner on the confirm button
   const setLoading = (loading: boolean) => {
     state.value.isLoading = loading;
   };
 
   return {
-    visible: ref(state.value.visible), // Expose refs for reactivity in component
-    title: ref(state.value.title),
-    message: ref(state.value.message),
-    confirmText: ref(state.value.confirmText),
-    cancelText: ref(state.value.cancelText),
-    isLoading: ref(state.value.isLoading),
-    // ---
-    state, // Expose whole state for ConfirmDialog.vue to bind
+    visible: computed(() => state.value.visible),
+    title: computed(() => state.value.title),
+    message: computed(() => state.value.message),
+    confirmText: computed(() => state.value.confirmText),
+    cancelText: computed(() => state.value.cancelText),
+    isLoading: computed(() => state.value.isLoading),
+    state,
     showDialog,
     handleConfirm,
     handleCancel,

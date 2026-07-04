@@ -487,6 +487,210 @@ export class TransfersService {
     });
   }
   
+  private async transferViaRelay(
+    taskId: string,
+    subTaskId: string,
+    sourceSshClient: Client,
+    sourceItem: { name: string; path: string; type: 'file' | 'directory' },
+    targetConnection: ConnectionWithTags,
+    targetCredentials: DecryptedConnectionCredentials,
+    remoteTargetPath: string,
+    signal: AbortSignal
+  ): Promise<void> {
+    this.updateSubTaskStatus(taskId, subTaskId, 'transferring', 3, `Starting backend-relayed transfer for ${sourceItem.name}.`);
+
+    if (signal.aborted) throw new DOMException('Transfer cancelled by user.', 'AbortError');
+
+    const targetClient = new Client();
+    const targetConnectConfig = this.buildSshConnectConfig(targetConnection, targetCredentials);
+
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        targetClient.end();
+        reject(new DOMException('Relay transfer cancelled by user.', 'AbortError'));
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+
+      targetClient
+        .on('ready', () => {
+          signal.removeEventListener('abort', onAbort);
+          resolve();
+        })
+        .on('error', (err) => {
+          signal.removeEventListener('abort', onAbort);
+          reject(err);
+        })
+        .connect(targetConnectConfig);
+    });
+
+    if (signal.aborted) {
+      targetClient.end();
+      throw new DOMException('Transfer cancelled by user.', 'AbortError');
+    }
+
+    try {
+      this.updateSubTaskStatus(taskId, subTaskId, 'transferring', 5, `Relay: connected to target ${targetConnection.host}.`);
+
+      await new Promise<void>((resolve, reject) => {
+        let cleanedUp = false;
+        const cleanup = () => {
+          if (cleanedUp) return;
+          cleanedUp = true;
+        };
+
+        sourceSshClient.sftp((sourceErr, sourceSftp) => {
+          if (sourceErr) { targetClient.end(); return reject(sourceErr); }
+          if (signal.aborted) { try { sourceSftp.end(); } catch (e) { /* ignore */ } targetClient.end(); return reject(new DOMException('Transfer cancelled by user.', 'AbortError')); }
+
+          targetClient.sftp((targetErr, targetSftp) => {
+            if (targetErr) { try { sourceSftp.end(); } catch (e) { /* ignore */ } targetClient.end(); return reject(targetErr); }
+
+            const closeSessions = () => {
+              try { sourceSftp.end(); } catch (e) { /* ignore */ }
+              try { targetSftp.end(); } catch (e) { /* ignore */ }
+            };
+
+            const run = async () => {
+              this.updateSubTaskStatus(taskId, subTaskId, 'transferring', 8, `Relay: SFTP sessions opened. Copying ${sourceItem.name}...`);
+
+              if (sourceItem.type === 'directory') {
+                await this.recursiveCopyDirViaSftp(
+                  taskId, subTaskId, sourceSftp, targetSftp,
+                  sourceItem.path, remoteTargetPath, signal
+                );
+              } else {
+                const targetFilePath = remoteTargetPath.endsWith('/')
+                  ? remoteTargetPath + sourceItem.name
+                  : remoteTargetPath + '/' + sourceItem.name;
+                await this.copyFileViaSftp(
+                  taskId, subTaskId, sourceSftp, targetSftp,
+                  sourceItem.path, targetFilePath, signal
+                );
+              }
+            };
+
+            run()
+              .then(() => { closeSessions(); cleanup(); resolve(); })
+              .catch(err => { closeSessions(); cleanup(); reject(err); });
+          });
+        });
+      });
+
+      this.updateSubTaskStatus(taskId, subTaskId, 'completed', 100, `Relay transfer completed for ${sourceItem.name}.`);
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        this.updateSubTaskStatus(taskId, subTaskId, 'cancelled', undefined, `Relay transfer cancelled: ${sourceItem.name}.`);
+      } else {
+        this.updateSubTaskStatus(taskId, subTaskId, 'failed', undefined, `Relay transfer failed for ${sourceItem.name}: ${error.message}`);
+      }
+      throw error;
+    } finally {
+      targetClient.end();
+    }
+  }
+
+  private async recursiveCopyDirViaSftp(
+    taskId: string,
+    subTaskId: string,
+    sourceSftp: SFTPWrapper,
+    targetSftp: SFTPWrapper,
+    sourceDirPath: string,
+    targetDirPath: string,
+    signal: AbortSignal
+  ): Promise<void> {
+    if (signal.aborted) throw new DOMException('Transfer cancelled by user.', 'AbortError');
+
+    await new Promise<void>((resolve, reject) => {
+      targetSftp.mkdir(targetDirPath, { mode: 0o755 }, (err) => {
+        if (err && (err as any).code === 4) {
+          resolve();
+        } else if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+
+    if (signal.aborted) throw new DOMException('Transfer cancelled by user.', 'AbortError');
+
+    const entries = await new Promise<{ filename: string; attrs: { isDirectory(): boolean } }[]>((resolve, reject) => {
+      sourceSftp.readdir(sourceDirPath, (err, list) => {
+        if (err) reject(err);
+        else resolve(list);
+      });
+    });
+
+    for (const entry of entries) {
+      if (entry.filename === '.' || entry.filename === '..') continue;
+      if (signal.aborted) throw new DOMException('Transfer cancelled by user.', 'AbortError');
+
+      const sourceEntryPath = path.posix.join(sourceDirPath, entry.filename);
+      const targetEntryPath = path.posix.join(targetDirPath, entry.filename);
+
+      if (entry.attrs.isDirectory()) {
+        await this.recursiveCopyDirViaSftp(taskId, subTaskId, sourceSftp, targetSftp, sourceEntryPath, targetEntryPath, signal);
+      } else {
+        await this.copyFileViaSftp(taskId, subTaskId, sourceSftp, targetSftp, sourceEntryPath, targetEntryPath, signal);
+      }
+    }
+  }
+
+  private async copyFileViaSftp(
+    taskId: string,
+    subTaskId: string,
+    sourceSftp: SFTPWrapper,
+    targetSftp: SFTPWrapper,
+    sourcePath: string,
+    targetPath: string,
+    signal: AbortSignal
+  ): Promise<void> {
+    if (signal.aborted) throw new DOMException('Transfer cancelled by user.', 'AbortError');
+
+    return new Promise<void>((resolve, reject) => {
+      let sourceStream: any = null;
+      let targetStream: any = null;
+      let finished = false;
+
+      const cleanup = () => {
+        if (finished) return;
+        finished = true;
+        try { if (sourceStream) sourceStream.destroy(); } catch (e) { /* ignore */ }
+        try { if (targetStream) targetStream.destroy(); } catch (e) { /* ignore */ }
+      };
+
+      const onAbort = () => {
+        cleanup();
+        reject(new DOMException('File copy cancelled by user.', 'AbortError'));
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+
+      sourceStream = sourceSftp.createReadStream(sourcePath);
+
+      sourceStream.on('error', (err: Error) => {
+        signal.removeEventListener('abort', onAbort);
+        cleanup();
+        reject(err);
+      });
+
+      targetStream = targetSftp.createWriteStream(targetPath);
+
+      targetStream.on('error', (err: Error) => {
+        signal.removeEventListener('abort', onAbort);
+        cleanup();
+        reject(err);
+      });
+
+      targetStream.on('close', () => {
+        signal.removeEventListener('abort', onAbort);
+        finished = true;
+        resolve();
+      });
+
+      sourceStream.pipe(targetStream);
+    });
+  }
+
   private escapeShellArg(arg: string): string {
     // Basic escaping for paths and arguments. More robust escaping might be needed.
     return `'${arg.replace(/'/g, "'\\''")}'`;
@@ -716,14 +920,18 @@ private async executeRemoteTransferOnSource(
         if (signal.aborted) throw new DOMException('Transfer cancelled by user.', 'AbortError');
         cmdOptions.sshIdentityFileOption = `-i ${this.escapeShellArg(tempTargetKeyPathOnSource)}`;
         if (targetCredentials.decryptedPassphrase && !sshpassPath) {
-          throw new Error(`Target key has passphrase, but sshpass is not available on source for ${sourceItem.name}.`);
+          console.info(`[TransfersService] Sub-task ${subTaskId}: sshpass not available for key+passphrase, falling back to relay.`);
+          await this.transferViaRelay(taskId, subTaskId, sourceSshClient, sourceItem, targetConnection, targetCredentials, remoteTargetPathOnTarget, signal);
+          return;
         }
         if (targetCredentials.decryptedPassphrase && sshpassPath) {
            cmdOptions.sshPassCommand = `${this.escapeShellArg(sshpassPath)} -p ${this.escapeShellArg(targetCredentials.decryptedPassphrase)}`;
         }
       } else if (targetConnection.auth_method === 'password' && targetCredentials.decryptedPassword) {
         if (!sshpassPath) {
-          throw new Error(`Target uses password auth, but sshpass is not available on source for ${sourceItem.name}.`);
+          console.info(`[TransfersService] Sub-task ${subTaskId}: sshpass not available for password auth, falling back to relay.`);
+          await this.transferViaRelay(taskId, subTaskId, sourceSshClient, sourceItem, targetConnection, targetCredentials, remoteTargetPathOnTarget, signal);
+          return;
         }
         cmdOptions.sshPassCommand = `${this.escapeShellArg(sshpassPath)} -p ${this.escapeShellArg(targetCredentials.decryptedPassword)}`;
       } else if (targetConnection.auth_method === 'key' && !targetCredentials.decryptedPrivateKey) {

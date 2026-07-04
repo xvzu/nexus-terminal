@@ -312,14 +312,13 @@ export const useQuickCommandsStore = defineStore('quickCommands', () => {
     };
 
 
-    // 添加快捷指令 (发送 tagIds 和 variables)
     const addQuickCommand = async (name: string | null, command: string, tagIds?: number[], variables?: Record<string, string>): Promise<boolean> => {
         try {
-            // 在请求体中包含 tagIds 和 variables
             const response = await apiClient.post<{ message: string, command: QuickCommandFE }>('/quick-commands', { name, command, tagIds, variables });
-            // 后端现在返回完整的 command 对象，可以直接使用或触发刷新
-            clearQuickCommandsCache(); // 清除缓存
-            await fetchQuickCommands(); // 重新获取以确保数据同步
+            if (response.data.command) {
+                quickCommandsList.value.unshift(response.data.command);
+            }
+            try { localStorage.setItem('quickCommandsListCache', JSON.stringify(quickCommandsList.value)); } catch {}
             uiNotificationsStore.showSuccess('快捷指令已添加');
             return true;
         } catch (err: any) {
@@ -330,14 +329,14 @@ export const useQuickCommandsStore = defineStore('quickCommands', () => {
         }
     };
 
-    // 更新快捷指令 (发送 tagIds 和 variables)
     const updateQuickCommand = async (id: number, name: string | null, command: string, tagIds?: number[], variables?: Record<string, string>): Promise<boolean> => {
          try {
-            // 在请求体中包含 tagIds 和 variables (即使是 undefined 也要发送，让后端知道是否要更新)
             const response = await apiClient.put<{ message: string, command: QuickCommandFE }>(`/quick-commands/${id}`, { name, command, tagIds, variables });
-            // 后端现在返回完整的 command 对象
-            clearQuickCommandsCache(); // 清除缓存
-            await fetchQuickCommands(); // 重新获取以确保数据同步
+            const index = quickCommandsList.value.findIndex(c => c.id === id);
+            if (index !== -1 && response.data.command) {
+                quickCommandsList.value[index] = response.data.command;
+            }
+            try { localStorage.setItem('quickCommandsListCache', JSON.stringify(quickCommandsList.value)); } catch {}
             uiNotificationsStore.showSuccess('快捷指令已更新');
             return true;
         } catch (err: any) {
@@ -352,12 +351,11 @@ export const useQuickCommandsStore = defineStore('quickCommands', () => {
     const deleteQuickCommand = async (id: number) => {
         try {
             await apiClient.delete(`/quick-commands/${id}`);
-            clearQuickCommandsCache(); // 清除所有排序缓存
-            // 从本地列表中移除
             const index = quickCommandsList.value.findIndex(cmd => cmd.id === id);
             if (index !== -1) {
                 quickCommandsList.value.splice(index, 1);
             }
+            try { localStorage.setItem('quickCommandsListCache', JSON.stringify(quickCommandsList.value)); } catch {}
             uiNotificationsStore.showSuccess('快捷指令已删除');
         } catch (err: any) {
             console.error('删除快捷指令失败:', err);

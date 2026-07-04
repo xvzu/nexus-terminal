@@ -90,77 +90,58 @@ export const useConnectionsStore = defineStore('connections', {
         // 更新参数类型以接受新的认证字段
         async addConnection(newConnectionData: {
             name: string;
-            type: 'SSH' | 'RDP' | 'VNC'; // Use uppercase
+            type: 'SSH' | 'RDP' | 'VNC';
             host: string;
             port: number;
             username: string;
-            auth_method: 'password' | 'key'; // SSH specific
-            password?: string; // SSH password or general password
-            private_key?: string; // SSH specific
-            passphrase?: string; // SSH specific
-            vncPassword?: string; // VNC specific password
+            auth_method: 'password' | 'key';
+            password?: string;
+            private_key?: string;
+            passphrase?: string;
+            vncPassword?: string;
             proxy_id?: number | null;
             proxy_type?: 'proxy' | 'jump' | null; 
-            tag_ids?: number[]; // 允许传入 tag_ids
+            tag_ids?: number[];
             jump_chain?: number[] | null;
         }) {
             this.isLoading = true;
             this.error = null;
             try {
-                const response = await apiClient.post<{ message: string; connection: ConnectionInfo }>('/connections', newConnectionData); // 使用 apiClient
-                // 添加成功后，清除缓存以便下次获取最新数据
-                localStorage.removeItem('connectionsCache');
-                // 可以选择重新获取整个列表，或者仅在本地添加
-                // this.connections.unshift(response.data.connection); // 本地添加可能导致与缓存不一致，建议重新获取
-                await this.fetchConnections(); // 推荐重新获取以保证数据一致性
-                return true; // 表示成功
+                const response = await apiClient.post<{ message: string; connection: ConnectionInfo }>('/connections', newConnectionData);
+                const newConn = response.data.connection;
+                this.connections.unshift(newConn);
+                try { localStorage.setItem('connectionsCache', JSON.stringify(this.connections)); } catch {}
+                return true;
             } catch (err: any) {
                 console.error('添加连接失败:', err);
                 this.error = err.response?.data?.message || err.message || '添加连接时发生未知错误。';
                  if (err.response?.status === 401) {
                     console.warn('未授权，需要登录才能添加连接。');
                 }
-                return false; // 表示失败
+                return false;
             } finally {
                 this.isLoading = false;
             }
         },
 
-        // 更新连接 Action
-        // 更新参数类型以包含 proxy_id 和 tag_ids
-        // Update parameter type to include 'type' and VNC fields
         async updateConnection(connectionId: number, updatedData: Partial<Omit<ConnectionInfo, 'id' | 'created_at' | 'updated_at' | 'last_connected_at'> & { type?: 'SSH' | 'RDP' | 'VNC'; password?: string; private_key?: string; passphrase?: string; vncPassword?: string; proxy_id?: number | null; proxy_type?: 'proxy' | 'jump' | null; tag_ids?: number[]; jump_chain?: number[] | null; }>) {
             this.isLoading = true;
             this.error = null;
             try {
-                // 发送 PUT 请求到 /api/v1/connections/:id
-                // 注意：后端 API 需要支持接收这些字段并进行更新
-                const response = await apiClient.put<{ message: string; connection: ConnectionInfo }>(`/connections/${connectionId}`, updatedData); // 使用 apiClient
-
-                // 更新成功后，在列表中找到并更新对应的连接信息
+                const response = await apiClient.put<{ message: string; connection: ConnectionInfo }>(`/connections/${connectionId}`, updatedData);
                 const index = this.connections.findIndex(conn => conn.id === connectionId);
                 if (index !== -1) {
-                    // 使用更新后的完整信息替换旧信息
-                    // 注意：后端返回的 connection 可能不包含敏感信息，但应包含更新后的非敏感字段
                     this.connections[index] = { ...this.connections[index], ...response.data.connection };
-                } else {
-                    // 如果本地找不到，fetchConnections 会处理
-                    // await this.fetchConnections(); // fetchConnections 内部会处理
                 }
-                 // 更新成功后，清除缓存以便下次获取最新数据
-                localStorage.removeItem('connectionsCache');
-                // 重新获取以确保数据同步（如果上面没有找到 index 并调用 fetchConnections）
-                if (index !== -1) { // 只有在本地找到并更新后才需要手动触发刷新缓存
-                   await this.fetchConnections(); // 重新获取以更新缓存和状态
-                }
-                return true; // 表示成功
+                try { localStorage.setItem('connectionsCache', JSON.stringify(this.connections)); } catch {}
+                return true;
             } catch (err: any) {
                 console.error(`更新连接 ${connectionId} 失败:`, err);
                 this.error = err.response?.data?.message || err.message || `更新连接时发生未知错误。`;
                 if (err.response?.status === 401) {
                     console.warn('未授权，需要登录才能更新连接。');
                 }
-                return false; // 表示失败
+                return false;
             } finally {
                 this.isLoading = false;
             }
@@ -174,13 +155,9 @@ export const useConnectionsStore = defineStore('connections', {
                 // 发送 DELETE 请求到 /api/v1/connections/:id
                 await apiClient.delete(`/connections/${connectionId}`); // 使用 apiClient
 
-                // 删除成功后，清除缓存以便下次获取最新数据
-                localStorage.removeItem('connectionsCache');
-                // 从本地列表中移除该连接
                 this.connections = this.connections.filter(conn => conn.id !== connectionId);
-                // 可以选择重新获取，但 filter 已经更新了本地状态，下次 fetch 会自动更新缓存
-                // await this.fetchConnections();
-                return true; // 表示成功
+                try { localStorage.setItem('connectionsCache', JSON.stringify(this.connections)); } catch {}
+                return true;
             } catch (err: any) {
                 console.error(`删除连接 ${connectionId} 失败:`, err);
                 this.error = err.response?.data?.message || err.message || `删除连接时发生未知错误。`;
@@ -194,49 +171,31 @@ export const useConnectionsStore = defineStore('connections', {
             }
         },
 
-        // 批量删除连接 
         async deleteBatchConnections(connectionIds: number[]): Promise<boolean> {
             if (!connectionIds || connectionIds.length === 0) {
-                console.warn('[ConnectionsStore] deleteBatchConnections called with no IDs.');
-                return true; // 没有要删除的，视为成功
+                return true;
             }
-            this.isLoading = true; // 标记整个批量删除操作正在进行
+            this.isLoading = true;
             this.error = null;
-            let allSucceeded = true;
-            const individualErrors: string[] = [];
-
-            for (const id of connectionIds) {
-                try {
-                    // 调用现有的 deleteConnection 方法
-                    const success = await this.deleteConnection(id);
-                    if (!success) {
-                        allSucceeded = false;
-                        if (this.error) {
-                            individualErrors.push(`删除连接 ID ${id} 失败: ${this.error}`);
-                        } else {
-                            individualErrors.push(`删除连接 ID ${id} 失败 (未知原因)`);
-                        }
-                        this.error = null;
-                    }
-                } catch (e: any) {
-                    // 捕获 deleteConnection 调用本身可能抛出的意外错误
-                    allSucceeded = false;
-                    const errorMessage = e.message || '未知错误';
-                    individualErrors.push(`调用删除连接 ID ${id} 时发生意外错误: ${errorMessage}`);
-                    console.error(`[ConnectionsStore] Unexpected error calling deleteConnection for ID ${id}`, e);
+            const results = await Promise.allSettled(
+                connectionIds.map(id =>
+                    apiClient.delete(`/connections/${id}`)
+                )
+            );
+            const failed: string[] = [];
+            results.forEach((r, i) => {
+                if (r.status === 'rejected') {
+                    failed.push(`ID ${connectionIds[i]}: ${r.reason?.response?.data?.message || r.reason?.message || '未知错误'}`);
                 }
-            }
-
-            if (!allSucceeded) {
-                this.error = `批量删除操作中部分连接未能成功删除。详情: ${individualErrors.join('; ')}`;
-                console.error('[ConnectionsStore] Batch delete operation completed with one or more failures.');
+            });
+            if (failed.length > 0) {
+                this.error = `批量删除操作中部分连接未能成功删除。详情: ${failed.join('; ')}`;
             } else {
-                // 如果所有操作都成功，确保 this.error 为 null
-                this.error = null;
+                this.connections = this.connections.filter(c => !connectionIds.includes(c.id));
+                try { localStorage.setItem('connectionsCache', JSON.stringify(this.connections)); } catch {}
             }
-
             this.isLoading = false;
-            return allSucceeded;
+            return failed.length === 0;
         },
 
         // 测试连接 Action
@@ -263,68 +222,64 @@ export const useConnectionsStore = defineStore('connections', {
 
         // 克隆连接 Action (调用后端克隆接口)
         async cloneConnection(originalId: number, newName: string): Promise<boolean> {
-            this.isLoading = true; // 可以考虑为克隆操作设置单独的加载状态
+            this.isLoading = true;
             this.error = null;
             try {
-                // 调用后端的克隆接口，例如 POST /connections/:id/clone
-                // 请求体可以包含新名称等信息
-                // 假设后端接口需要 { name: newName } 作为请求体
-                await apiClient.post(`/connections/${originalId}/clone`, { name: newName });
-
-                // 克隆成功后，清除缓存并重新获取列表以显示新连接
-                localStorage.removeItem('connectionsCache');
-                await this.fetchConnections(); // 重新获取以保证数据一致性
-                return true; // 表示成功
+                const response = await apiClient.post<{ message: string; connection: ConnectionInfo }>(`/connections/${originalId}/clone`, { name: newName });
+                if (response.data.connection) {
+                    this.connections.unshift(response.data.connection);
+                }
+                try { localStorage.setItem('connectionsCache', JSON.stringify(this.connections)); } catch {}
+                return true;
             } catch (err: any) {
                 console.error(`克隆连接 ${originalId} 失败:`, err);
                 this.error = err.response?.data?.message || err.message || `克隆连接时发生未知错误。`;
                 if (err.response?.status === 401) {
                     console.warn('未授权，需要登录才能克隆连接。');
                 }
-                return false; // 表示失败
+                return false;
             } finally {
                 this.isLoading = false;
             }
         },
 
-        // +++ 为多个连接添加一个标签 (调用新的后端 API) +++
         async addTagToConnectionsAction(connectionIds: number[], tagId: number): Promise<boolean> {
-             if (connectionIds.length === 0) return true; // 没有连接需要更新，直接返回成功
-
-             this.isLoading = true; // 可以考虑为批量操作设置单独状态
+             if (connectionIds.length === 0) return true;
+             this.isLoading = true;
              this.error = null;
              try {
-                 // 调用新的后端 API POST /connections/add-tag
                  await apiClient.post('/connections/add-tag', {
                      connection_ids: connectionIds,
                      tag_id: tagId
                  });
-
-                 // 更新成功后，清除缓存并重新获取以保证数据一致性
-                 localStorage.removeItem('connectionsCache');
-                 await this.fetchConnections();
-                 return true; // 表示成功
+                 this.connections.forEach(conn => {
+                     if (connectionIds.includes(conn.id)) {
+                         if (!conn.tag_ids) conn.tag_ids = [];
+                         if (!conn.tag_ids.includes(tagId)) conn.tag_ids.push(tagId);
+                     }
+                 });
+                 try { localStorage.setItem('connectionsCache', JSON.stringify(this.connections)); } catch {}
+                 return true;
              } catch (err: any) {
-                 console.error(`为连接 ${connectionIds.join(', ')} 添加标签 ${tagId} 失败:`, err);
+                 console.error(`为连接添加标签失败:`, err);
                  this.error = err.response?.data?.message || err.message || `为连接添加标签时发生未知错误。`;
-                  if (err.response?.status === 401) {
+                 if (err.response?.status === 401) {
                      console.warn('未授权，需要登录才能为连接添加标签。');
                  }
-                 return false; // 表示失败
+                 return false;
              } finally {
                  this.isLoading = false;
              }
         },
 
-        // (保留) 更新单个连接的标签 (如果仍有需要)
         async updateConnectionTags(connectionId: number, tagIds: number[]): Promise<boolean> {
             this.isLoading = true;
             this.error = null;
             try {
-                // 注意：此 API 端点可能已在后端移除或更改
                 await apiClient.put(`/connections/${connectionId}/tags`, { tag_ids: tagIds });
-                localStorage.removeItem('connectionsCache');
-                await this.fetchConnections();
+                const conn = this.connections.find(c => c.id === connectionId);
+                if (conn) conn.tag_ids = tagIds;
+                try { localStorage.setItem('connectionsCache', JSON.stringify(this.connections)); } catch {}
                 return true;
             } catch (err: any) {
                 console.error(`更新连接 ${connectionId} 的标签失败:`, err);

@@ -143,9 +143,10 @@
         <button
           @click="handleSend"
           class="px-4 py-2 bg-button text-button-text rounded-md shadow-sm hover:bg-button-hover focus:outline-none focus:ring-2 focus:ring-offset-background focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150 ease-in-out"
-          :disabled="selectedConnectionIds.length === 0 || !targetPath.trim()"
+          :disabled="selectedConnectionIds.length === 0 || !targetPath.trim() || isSending"
         >
-          {{ t('sendFilesModal.sendButton') }}
+          <i v-if="isSending" class="fas fa-spinner fa-spin mr-1"></i>
+          {{ isSending ? t('sendFilesModal.sendingButton') : t('sendFilesModal.sendButton') }}
         </button>
       </div>
     </div>
@@ -199,6 +200,7 @@ const searchTerm = ref('');
 const targetPath = ref('');
 const transferMethod = ref<'auto' | 'rsync' | 'scp'>('auto');
 const selectedConnectionIds = ref<number[]>([]);
+const isSending = ref(false);
 
 const isLoadingConnections = ref(false);
 const isLoadingTags = ref(false);
@@ -214,16 +216,8 @@ const toggleTagGroupExpansion = (group: GroupedConnection) => {
     expandedTagGroups.value[groupId] = !(expandedTagGroups.value[groupId] ?? true);
   };
   
-  // Simulate data for itemsToSend for development if not provided
 const itemsToSendInternal = computed<ItemToSend[]>(() => {
-  if (props.itemsToSend && props.itemsToSend.length > 0) {
-    return props.itemsToSend;
-  }
-  return [
-    { name: 'file1.txt', path: '/local/file1.txt', type: 'file' },
-    { name: 'folderA', path: '/local/folderA', type: 'directory' },
-    { name: 'another-item.zip', path: '/local/another-item.zip', type: 'file' }
-  ];
+  return props.itemsToSend && props.itemsToSend.length > 0 ? props.itemsToSend : [];
 });
 
 
@@ -351,22 +345,38 @@ const toggleTagGroupSelection = (group: GroupedConnection) => {
   }
 };
 
-watch(() => props.visible, (newValue) => {
+const resetState = () => {
+  searchTerm.value = '';
+  targetPath.value = '';
+  transferMethod.value = 'auto';
+  selectedConnectionIds.value = [];
+  isSending.value = false;
+  expandedTagGroups.value = {};
+};
+
+watch(() => props.visible, async (newValue) => {
   if (newValue) {
+    resetState();
     if (connectionsStore.connections.length === 0) {
-      connectionsStore.fetchConnections().catch(error => console.error(t('sendFilesModal.errorFetchingConnections'), error));
+      try { await connectionsStore.fetchConnections(); } catch (e) {
+        console.error(t('sendFilesModal.errorFetchingConnections'), e);
+      }
     }
     if (tagsStore.tags.length === 0) {
-      tagsStore.fetchTags().catch(error => console.error(t('sendFilesModal.errorFetchingTags'), error));
+      try { await tagsStore.fetchTags(); } catch (e) {
+        console.error(t('sendFilesModal.errorFetchingTags'), e);
+      }
     }
   }
 });
 
 const handleSend = async () => {
   if (selectedConnectionIds.value.length === 0 || !targetPath.value.trim()) {
-    uiNotificationsStore.showError(t('sendFilesModal.validationError')); // Assuming you add this key
+    uiNotificationsStore.showError(t('sendFilesModal.validationError'));
     return;
   }
+  if (isSending.value) return;
+  isSending.value = true;
 
   const sourceItems: SourceItem[] = itemsToSendInternal.value;
 
@@ -378,28 +388,28 @@ const handleSend = async () => {
     transferMethod: transferMethod.value,
   };
 
-  // 验证 sourceConnectionId 是否存在
   if (payload.sourceConnectionId === null || payload.sourceConnectionId === undefined) {
     console.error('Source Connection ID is missing in SendFilesModal payload:', payload);
-    uiNotificationsStore.showError(t('sendFilesModal.errorSourceConnectionMissing', 'Source server information is missing. Cannot initiate transfer.'));
+    uiNotificationsStore.showError(t('sendFilesModal.errorSourceConnectionMissing'));
+    isSending.value = false;
     return;
   }
 
   try {
     const response = await apiClient.post('/transfers/send', payload);
-    // Assuming the backend returns something like { taskId: "some-id" } on success
     if (response.data && response.data.taskId) {
       uiNotificationsStore.showSuccess(t('sendFilesModal.transferInitiated', { taskId: response.data.taskId }));
     } else {
       uiNotificationsStore.showSuccess(t('sendFilesModal.transferInitiatedGeneric'));
     }
-    emitWorkspaceEvent('ui:openTransferProgressModal'); // +++ 触发打开传输进度模态框的事件 +++
+    emitWorkspaceEvent('ui:openTransferProgressModal');
     emit('update:visible', false);
   } catch (error: any) {
     console.error('Failed to initiate transfer:', error);
     const errorMessage = error.response?.data?.message || error.message || t('sendFilesModal.transferFailedError');
     uiNotificationsStore.showError(errorMessage);
-    // Do not close modal on error
+  } finally {
+    isSending.value = false;
   }
 };
 

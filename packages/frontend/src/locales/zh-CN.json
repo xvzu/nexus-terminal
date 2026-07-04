@@ -195,9 +195,9 @@
     "recaptchaV3Notice": "此网站受 reCAPTCHA 保护，并适用 Google 隐私政策和服务条款。"
   },
   "connections": {
-    "addConnection": "添加新连接",
-    "noConnections": "还没有任何连接。点击'添加新连接'来创建一个吧！",
-    "addFirstConnection": "添加第一个连接",
+    "addConnection": "添加服务器",
+    "noConnections": "还没有任何连接。点击'添加服务器'来创建一个吧！",
+    "addFirstConnection": "添加第一个服务器",
     "table": {
       "name": "名称",
       "host": "主机",
@@ -226,14 +226,14 @@
     "actions": {
       "testAllFiltered":"测试全部",
       "connect": "连接",
-      "edit": "编辑",
-      "delete": "删除",
+      "edit": "编辑服务器",
+      "delete": "删除服务器",
       "test": "测试",
       "testing": "测试中...",
-      "clone": "克隆"
+      "clone": "复制服务器"
     },
     "form": {
-      "title": "添加新连接",
+      "title": "添加服务器",
       "name": "名称:",
       "host": "主机/IP:",
       "port": "端口:",
@@ -1200,7 +1200,10 @@
     "confirmDeleteAllConnectionsInGroup": "确定要删除分组 '{groupName}' 中的全部 {count} 个连接吗？此操作不可撤销。",
     "allConnectionsInGroupDeletedSuccess": "已成功从分组 '{groupName}' 中删除 {count} 个连接。",
     "cannotDeleteFromUntagged": "不能使用此选项从“未标记”分组中删除连接。",
-    "someConnectionsInGroupDeleteFailed": "分组 '{groupName}' 中的 {count} 个连接未能删除。"
+    "someConnectionsInGroupDeleteFailed": "分组 '{groupName}' 中的 {count} 个连接未能删除。",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "zoomReset": "重置缩放"
   },
   "remoteDesktopModal": {
     "title": "远程桌面",
@@ -1297,7 +1300,10 @@
   },
   "quickCommands": {
     "searchPlaceholder": "搜索名称或指令...",
-    "add": "添加",
+    "add": "添加命令",
+    "copy": "复制命令",
+    "edit": "编辑命令",
+    "delete": "删除命令",
     "sortByName": "名称",
     "sortByUsage": "使用频率",
     "usageCount": "使用次数",
@@ -1573,6 +1579,7 @@
     "itemsToSendTitle": "待发送项目:",
     "noItemsSelected": "未选择待发送的项目。",
     "sendButton": "发送",
+    "sendingButton": "发送中...",
     "cancelButton": "取消",
     "errorFetchingData": "获取模态框数据时出错。",
     "errorFetchingConnections": "获取连接数据时出错。",
@@ -1580,6 +1587,7 @@
     "validationError": "请至少选择一个连接并指定目标路径。",
     "transferInitiated": "传输任务已创建",
     "transferInitiatedGeneric": "传输任务创建成功。",
+    "errorSourceConnectionMissing": "源服务器信息缺失，无法发起传输。",
     "transferFailedError": "发起传输失败。请重试。"
   },
   "time": {
@@ -1631,7 +1639,7 @@
     },
     "confirmDelete": "您确定要删除 \"{name}\" 吗？",
     "searchPlaceholder": "按名称或路径搜索...",
-    "addNew": "添加新收藏路径",
+    "addNew": "添加收藏",
     "loading": "正在加载收藏...",
     "noResults": "未找到匹配的收藏。",
     "noFavorites": "还没有收藏路径，快添加一个吧！",

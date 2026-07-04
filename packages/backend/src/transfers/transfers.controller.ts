@@ -38,7 +38,10 @@ export class TransfersController {
         res.status(400).json({ message: 'sourceItems must be a non-empty array.' });
         return;
       }
-      // 更多详细验证可以后续添加
+      if (payload.sourceConnectionId === null || payload.sourceConnectionId === undefined || typeof payload.sourceConnectionId !== 'number') {
+        res.status(400).json({ message: 'sourceConnectionId is required and must be a number.' });
+        return;
+      }
 
       const task = await this.transfersService.initiateNewTransfer(payload, userId);
       res.status(202).json(task); // 202 Accepted 表示请求已接受处理，但尚未完成

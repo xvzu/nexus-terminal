@@ -29,6 +29,39 @@ const uiNotificationsStore = useUiNotificationsStore(); // +++ 修正实例化�
 const settingsStore = useSettingsStore(); // 实例化设置 store
 const { showConfirmDialog } = useConfirmDialog();
 
+// Zoom state (独立于快捷指令)
+const CL_ZOOM_KEY = 'nexus_connectionListRowSizeMultiplier';
+const rowSizeMultiplier = ref(loadConnectionListZoom());
+
+function loadConnectionListZoom(): number {
+  try {
+    const v = localStorage.getItem(CL_ZOOM_KEY);
+    if (v) {
+      const n = parseFloat(v);
+      if (!isNaN(n) && n >= 0.5 && n <= 2.5) return n;
+    }
+  } catch {}
+  return 1.0;
+}
+
+function saveConnectionListZoom(val: number) {
+  try { localStorage.setItem(CL_ZOOM_KEY, String(val)); } catch {}
+}
+
+const setZoom = (value: number) => {
+  const clamped = Math.max(0.5, Math.min(2.5, value));
+  const rounded = parseFloat(clamped.toFixed(2));
+  rowSizeMultiplier.value = rounded;
+  saveConnectionListZoom(rounded);
+};
+
+const handleWheel = (event: WheelEvent) => {
+  if (!event.ctrlKey && !event.metaKey) return;
+  event.preventDefault();
+  const delta = event.deltaY > 0 ? -0.15 : 0.15;
+  setZoom(rowSizeMultiplier.value + delta);
+};
+
 const { connections, isLoading: connectionsLoading, error: connectionsError } = storeToRefs(connectionsStore);
 const { tags, isLoading: tagsLoading, error: tagsError } = storeToRefs(tagsStore);
 const { showConnectionTagsBoolean } = storeToRefs(settingsStore); // 获取设置项
@@ -130,38 +163,29 @@ const setTagInputRef = (el: any, id: string | number) => {
   }
 };
 
-// 计算属性：过滤并按标签分组连接 (仅在 showConnectionTagsBoolean 为 true 时使用)
-const filteredAndGroupedConnections = computed(() => {
-  const groups: Record<string, { connections: ConnectionInfo[], tagId: number | null }> = {}; // 修改：添加 tagId
-  const untagged: ConnectionInfo[] = [];
-  const tagMap = new Map(tags.value.map(tag => [tag.id, tag]));
+// Shared filtering logic
+const filteredConnections = computed(() => {
   const lowerSearchTerm = searchTerm.value.toLowerCase();
-
-  // 1. 过滤连接 (New logic: filter by connection name, host, OR tag name)
-  const filteredConnections = connections.value.filter(conn => {
-    // Check connection name
-    if (conn.name && conn.name.toLowerCase().includes(lowerSearchTerm)) {
-        return true;
-    }
-    // Check connection host
-    if (conn.host.toLowerCase().includes(lowerSearchTerm)) {
-        return true;
-    }
-    // Check associated tag names (Always check tags for filtering, regardless of display setting)
+  const tagMap = new Map(tags.value.map(tag => [tag.id, tag]));
+  return connections.value.filter(conn => {
+    if (conn.name && conn.name.toLowerCase().includes(lowerSearchTerm)) return true;
+    if (conn.host.toLowerCase().includes(lowerSearchTerm)) return true;
     if (conn.tag_ids && conn.tag_ids.length > 0) {
-        for (const tagId of conn.tag_ids) {
-            const tag = tagMap.get(tagId); // Use the existing tagMap
-            if (tag && tag.name.toLowerCase().includes(lowerSearchTerm)) {
-                return true; // Match found in tag name
-            }
-        }
+      for (const tagId of conn.tag_ids) {
+        const tag = tagMap.get(tagId);
+        if (tag && tag.name.toLowerCase().includes(lowerSearchTerm)) return true;
+      }
     }
-    // No match found
     return false;
   });
+});
 
-  // 2. 分组过滤后的连接
-  filteredConnections.forEach(conn => {
+const filteredAndGroupedConnections = computed(() => {
+  const groups: Record<string, { connections: ConnectionInfo[], tagId: number | null }> = {};
+  const untagged: ConnectionInfo[] = [];
+  const tagMap = new Map(tags.value.map(tag => [tag.id, tag]));
+
+  filteredConnections.value.forEach(conn => {
     if (conn.tag_ids && conn.tag_ids.length > 0) {
       let tagged = false;
       conn.tag_ids.forEach(tagId => {
@@ -169,87 +193,52 @@ const filteredAndGroupedConnections = computed(() => {
         if (tag) {
           const groupName = tag.name;
           if (!groups[groupName]) {
-            groups[groupName] = { connections: [], tagId: tag.id }; // 修改：存储 tagId
-            // Initialize expanded state only if not already set
+            groups[groupName] = { connections: [], tagId: tag.id };
             if (expandedGroups.value[groupName] === undefined) {
-               expandedGroups.value[groupName] = true; // Default to expanded
+               expandedGroups.value[groupName] = true;
             }
           }
-          // Avoid duplicates if a connection has multiple tags matching the search
           if (!groups[groupName].connections.some(c => c.id === conn.id)) {
               groups[groupName].connections.push(conn);
           }
           tagged = true;
         }
       });
-      // If none of the tags were found in the tagMap (e.g., stale data), treat as untagged
       if (!tagged && !untagged.some(c => c.id === conn.id)) {
           untagged.push(conn);
       }
     } else {
-      // Ensure untagged connections are not duplicated
       if (!untagged.some(c => c.id === conn.id)) {
           untagged.push(conn);
       }
     }
   });
 
-  // 3. 排序和格式化输出
   for (const groupName in groups) {
       groups[groupName].connections.sort((a, b) => (a.name || a.host).localeCompare(b.name || b.host));
   }
   untagged.sort((a, b) => (a.name || a.host).localeCompare(b.name || b.host));
 
   const sortedGroupNames = Object.keys(groups).sort();
-  // 修改：结果包含 tagId
   const result: { groupName: string; connections: ConnectionInfo[]; tagId: number | null }[] = sortedGroupNames.map(name => ({
       groupName: name,
       connections: groups[name].connections,
-      tagId: groups[name].tagId // 添加 tagId
+      tagId: groups[name].tagId
   }));
 
   if (untagged.length > 0) {
       const untaggedGroupName = t('workspaceConnectionList.untagged');
-      // Initialize expanded state only if not already set
       if (expandedGroups.value[untaggedGroupName] === undefined) {
-          expandedGroups.value[untaggedGroupName] = true; // Default to expanded
+          expandedGroups.value[untaggedGroupName] = true;
       }
-      // 未标记的分组没有 tagId
       result.push({ groupName: untaggedGroupName, connections: untagged, tagId: null });
   }
 
   return result;
 });
 
-// 计算属性，仅过滤，不分组 (用于 showConnectionTagsBoolean 为 false 时)
 const flatFilteredConnections = computed(() => {
-  const lowerSearchTerm = searchTerm.value.toLowerCase();
-  const tagMap = new Map(tags.value.map(tag => [tag.id, tag.name])); // 创建 tagMap 用于搜索
-
-  const filtered = connections.value.filter(conn => {
-    // Check connection name
-    if (conn.name && conn.name.toLowerCase().includes(lowerSearchTerm)) {
-        return true;
-    }
-    // Check connection host
-    if (conn.host.toLowerCase().includes(lowerSearchTerm)) {
-        return true;
-    }
-    // Check associated tag names (Always check tags for filtering)
-    if (conn.tag_ids && conn.tag_ids.length > 0) {
-        for (const tagId of conn.tag_ids) {
-            const tagName = tagMap.get(tagId);
-            if (tagName && tagName.toLowerCase().includes(lowerSearchTerm)) {
-                return true; // Match found in tag name
-            }
-        }
-    }
-    // No match found
-    return false;
-  });
-
-  // Sort the flat list
-  return filtered.sort((a, b) => (a.name || a.host).localeCompare(b.name || b.host));
+  return [...filteredConnections.value].sort((a, b) => (a.name || a.host).localeCompare(b.name || b.host));
 });
 
 
@@ -325,17 +314,15 @@ const handleConnect = (connectionId: number, event?: MouseEvent | KeyboardEvent)
 //   selectedRdpConnection.value = null;
 // };
 
-// 显示右键菜单
-const showContextMenu = (event: MouseEvent, connection: ConnectionInfo) => {
-console.log(`[WkspConnList] showContextMenu (右键) called for ID: ${connection.id}. Event:`, event);
-event.preventDefault(); // 再次确保阻止默认行为
-event.stopPropagation(); // 阻止事件冒泡
-event.stopImmediatePropagation(); // 尝试更强力地阻止事件链
-console.log('[WkspConnList] Right-click default prevented and propagation stopped.');
+// 显示右键菜单 (connection 为 null 时是空白区域右键)
+const showContextMenu = (event: MouseEvent, connection: ConnectionInfo | null) => {
+event.preventDefault();
+event.stopPropagation();
+event.stopImmediatePropagation();
+closeTagContextMenu();
 contextTargetConnection.value = connection;
 contextMenuPosition.value = { x: event.clientX, y: event.clientY };
 contextMenuVisible.value = true;
-// 添加全局点击监听器以关闭菜单
 document.addEventListener('click', closeContextMenu, { once: true });
 
 // 使用 nextTick 获取菜单尺寸并调整位置以防止超出屏幕
@@ -381,8 +368,25 @@ const closeContextMenu = () => {
 };
 
 // 处理右键菜单操作
-const handleMenuAction = async (action: 'add' | 'edit' | 'delete' | 'clone') => { // 添加 'clone' 类型
+const handleMenuAction = async (action: 'add' | 'edit' | 'delete' | 'clone' | 'zoomIn' | 'zoomOut' | 'zoomReset') => {
   const conn = contextTargetConnection.value;
+
+  if (action === 'zoomIn') {
+    closeContextMenu();
+    setZoom(rowSizeMultiplier.value + 0.15);
+    return;
+  }
+  if (action === 'zoomOut') {
+    closeContextMenu();
+    setZoom(rowSizeMultiplier.value - 0.15);
+    return;
+  }
+  if (action === 'zoomReset') {
+    closeContextMenu();
+    setZoom(1.0);
+    return;
+  }
+
   closeContextMenu(); // 先关闭菜单
 
   if (action === 'add') {
@@ -601,12 +605,13 @@ const handleBlur = () => {
 let unregisterFocusAction: (() => void) | null = null; // 用于存储注销函数
 
 onMounted(() => {
-  // 调用新的 registerFocusAction 并存储返回的注销函数
-  // focusSearchInput 返回 boolean，符合 () => boolean | Promise<boolean | undefined> 类型
   unregisterFocusAction = focusSwitcherStore.registerFocusAction('connectionListSearch', focusSearchInput);
-  connectionsStore.fetchConnections(); // 移到 onMounted
-  tagsStore.fetchTags(); // 移到 onMounted
-  // Load initial expanded state after fetching tags/connections
+  Promise.all([
+    connectionsStore.fetchConnections(),
+    tagsStore.fetchTags()
+  ]).catch(err => {
+    console.error('[WkspConnList] Failed to load initial data:', err);
+  });
   expandedGroups.value = loadInitialExpandedGroups();
 });
 
@@ -768,7 +773,7 @@ const cancelEditingTag = () => {
 </script>
 
 <template>
-  <div class="h-full flex flex-col overflow-hidden bg-background text-foreground">
+  <div class="h-full flex flex-col overflow-hidden bg-background text-foreground" :style="{ '--qc-row-size-multiplier': rowSizeMultiplier }">
     <!-- ... Loading/Error states ... -->
     <div v-if="(connectionsLoading || tagsLoading) && connections.length === 0 && tags.length === 0" class="flex items-center justify-center h-full text-text-secondary">
       <i class="fas fa-spinner fa-spin mr-2"></i> {{ t('common.loading') }}
@@ -801,10 +806,10 @@ const cancelEditingTag = () => {
       </div>
 
       <!-- Connection List Area -->
-      <div class="flex-grow overflow-y-auto p-2" ref="listAreaRef">
+      <div class="flex-grow overflow-y-auto p-2" ref="listAreaRef" @wheel.prevent="handleWheel" @contextmenu="showContextMenu($event, null)">
         <!-- No Results / No Connections State -->
         <!-- 修改 v-if 条件，考虑两种模式，并且仅在有搜索词时显示 "No Results" -->
-        <div v-if="((showConnectionTagsBoolean && filteredAndGroupedConnections.length === 0) || (!showConnectionTagsBoolean && flatFilteredConnections.length === 0)) && connections.length > 0 && searchTerm" class="p-6 text-center text-text-secondary">
+        <div v-if="flatFilteredConnections.length === 0 && connections.length > 0 && searchTerm" class="p-6 text-center text-text-secondary">
            <i class="fas fa-search text-xl mb-2"></i>
            <p>{{ t('workspaceConnectionList.noResults') }} "{{ searchTerm }}"</p>
         </div>
@@ -819,98 +824,25 @@ const cancelEditingTag = () => {
            </button>
         </div>
 
-        <!-- Groups and Connections (Conditional Rendering) -->
-        <div v-else>
-          <!-- Grouped View -->
-          <div v-if="showConnectionTagsBoolean">
-            <div v-for="groupData in filteredAndGroupedConnections" :key="groupData.groupName" class="mb-1 last:mb-0">
-              <!-- Group Header -->
-              <div
-              class="group px-3 py-2 font-semibold flex items-center text-foreground rounded-md hover:bg-header/80 transition-colors duration-150"
-              :class="{ 'cursor-pointer': editingTagId !== (groupData.tagId === null ? 'untagged' : groupData.tagId) }"
-              @click="editingTagId !== (groupData.tagId === null ? 'untagged' : groupData.tagId) ? toggleGroup(groupData.groupName) : null"
-              @contextmenu.prevent="showTagContextMenu($event, groupData)"
-            >
-              <i
-                :class="['fas', expandedGroups[groupData.groupName] ? 'fa-chevron-down' : 'fa-chevron-right', 'mr-2 w-4 text-center text-text-secondary group-hover:text-foreground transition-transform duration-200 ease-in-out', {'transform rotate-0': !expandedGroups[groupData.groupName]}]"
-                @click.stop="toggleGroup(groupData.groupName)"
-                class="cursor-pointer flex-shrink-0"
-              ></i>
-              <!-- 编辑状态 -->
-              <input
-                v-if="editingTagId === (groupData.tagId === null ? 'untagged' : groupData.tagId)"
-                :key="groupData.tagId === null ? 'untagged-input' : `tag-input-${groupData.tagId}`"
-                :ref="(el) => setTagInputRef(el, groupData.tagId === null ? 'untagged' : groupData.tagId)"
-                type="text"
-                v-model="editedTagName"
-                class="text-sm bg-input border border-primary rounded px-1 py-0 w-full"
-                @blur="finishEditingTag"
-                @keydown.enter.prevent="finishEditingTag"
-                @keydown.esc.prevent="cancelEditingTag"
-                @click.stop
-              />
-              <!-- 显示状态 -->
-              <span
-                v-else
-                class="text-sm inline-block overflow-hidden text-ellipsis whitespace-nowrap"
-                :class="{ 'cursor-pointer hover:underline': true }"
-                :title="t('workspaceConnectionList.clickToEditTag')"
-                @click.stop="startEditingTag(groupData.tagId, groupData.groupName)"
-              >
-                {{ groupData.groupName }}
-              </span>
-              <!-- 占位符，占据剩余空间 -->
-              <div class="flex-grow min-w-0"></div>
-              <!-- 标签栏右侧的编辑按钮 -->
-              <button
-                v-if="groupData.tagId !== null && editingTagId !== (groupData.tagId === null ? 'untagged' : groupData.tagId)"
-                @click.stop="handleTagMenuAction('manageTag', groupData)"
-                class="ml-2 px-1 h-6 flex items-center justify-center rounded text-text-secondary hover:text-primary hover:bg-black/10 opacity-0 group-hover:opacity-100 transition-all duration-150 focus:outline-none"
-                :title="t('workspaceConnectionList.manageTags.menuItem')"
-              >
-                <i class="fas fa-edit fa-xs"></i>
-              </button>
-           </div>
-           <!-- Connection Items List -->
-            <ul v-show="expandedGroups[groupData.groupName]" class="list-none p-0 m-0 pl-3">
-              <!-- ... li v-for="conn in groupData.connections" ... -->
-               <li
-                 v-for="conn in groupData.connections"
-                 :key="conn.id"
-                 class="group my-0.5 py-2 pr-3 pl-4 cursor-pointer flex items-center rounded-md whitespace-nowrap overflow-hidden text-ellipsis text-foreground hover:bg-primary/10 transition-colors duration-150"
-                 :class="{ 'bg-primary/20 font-medium': conn.id === highlightedConnectionId }"
-                 :data-conn-id="conn.id"
-                 @click.left="handleConnect(conn.id)"
-                 @click.right.prevent
-                 @contextmenu.prevent="showContextMenu($event, conn)"
-               >
-                 <i :class="['fas', conn.type === 'RDP' ? 'fa-desktop' : (conn.type === 'VNC' ? 'fa-plug' : 'fa-server'), 'mr-2.5 w-4 text-center text-text-secondary group-hover:text-primary', { 'text-white': conn.id === highlightedConnectionId }]"></i>
-                 <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm" :title="conn.name || conn.host">
-                   {{ conn.name || conn.host }}
-                 </span>
-               </li>
-            </ul>
-            </div>
-          </div>
-          <!-- Flat View -->
-          <ul v-else class="list-none p-0 m-0">
-              <li
-                v-for="conn in flatFilteredConnections"
-                :key="conn.id"
-                class="group my-0.5 py-2 pr-3 pl-4 cursor-pointer flex items-center rounded-md whitespace-nowrap overflow-hidden text-ellipsis text-foreground hover:bg-primary/10 transition-colors duration-150"
-                :class="{ 'bg-primary/20 font-medium': conn.id === highlightedConnectionId }"
-                :data-conn-id="conn.id"
-                @click.left="handleConnect(conn.id)"
-                @click.right.prevent
-                @contextmenu.prevent="showContextMenu($event, conn)"
-              >
-                <i :class="['fas', conn.type === 'RDP' ? 'fa-desktop' : (conn.type === 'VNC' ? 'fa-chalkboard' : 'fa-server'), 'mr-2.5 w-4 text-center text-text-secondary group-hover:text-primary', { 'text-white': conn.id === highlightedConnectionId }]"></i>
-                <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm" :title="conn.name || conn.host">
-                  {{ conn.name || conn.host }}
-                </span>
-              </li>
-          </ul>
-        </div>
+        <!-- Connections: horizontal wrap list -->
+        <ul v-else class="list-none p-0 m-0 flex flex-wrap content-start gap-1.5">
+          <li
+            v-for="conn in flatFilteredConnections"
+            :key="conn.id"
+            :data-conn-id="conn.id"
+            class="inline-flex rounded-md hover:bg-primary/10 transition-colors duration-150"
+            :class="{ 'bg-primary/20 font-medium': conn.id === highlightedConnectionId }"
+            :style="{ padding: 'calc(0.35rem * var(--qc-row-size-multiplier, 1)) calc(0.6rem * var(--qc-row-size-multiplier, 1))' }"
+            @contextmenu.prevent="showContextMenu($event, conn)"
+          >
+            <span
+              class="truncate text-foreground cursor-pointer hover:text-primary"
+              :style="{ fontSize: 'calc(0.875em * max(0.85, var(--qc-row-size-multiplier, 1) * 0.6 + 0.4))' }"
+              :title="conn.name || conn.host"
+              @click.stop="handleConnect(conn.id)"
+            >{{ conn.name || conn.host }}</span>
+          </li>
+        </ul>
       </div>
     </div>
 
@@ -923,6 +855,21 @@ const cancelEditingTag = () => {
         @click.stop
       >
         <ul class="list-none p-0 m-0">
+          <!-- Zoom controls (always shown) -->
+          <li class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1" @click="handleMenuAction('zoomIn')">
+            <i class="fas fa-search-plus mr-2 w-4 text-center text-text-secondary group-hover:text-primary"></i>
+            <span>{{ t('workspaceConnectionList.zoomIn', '放大') }}</span>
+          </li>
+          <li class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1" @click="handleMenuAction('zoomOut')">
+            <i class="fas fa-search-minus mr-2 w-4 text-center text-text-secondary group-hover:text-primary"></i>
+            <span>{{ t('workspaceConnectionList.zoomOut', '缩小') }}</span>
+          </li>
+          <li class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1" @click="handleMenuAction('zoomReset')">
+            <i class="fas fa-undo mr-2 w-4 text-center text-text-secondary group-hover:text-primary"></i>
+            <span>{{ t('workspaceConnectionList.zoomReset', '重置缩放') }}</span>
+          </li>
+          <li class="border-t border-border/50 my-1"></li>
+          <!-- Connection-specific actions or Add server -->
           <li class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1" @click="handleMenuAction('add')">
               <i class="fas fa-plus mr-3 w-4 text-center text-text-secondary group-hover:text-primary"></i>
               <span>{{ t('connections.addConnection') }}</span>

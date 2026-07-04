@@ -97,8 +97,4 @@ networks:
   nexus-terminal-network:
     driver: bridge
     name: nexus-terminal-network
-    enable_ipv6: true
-    ipam:
-      config:
-        - subnet: fd01::/64
-          gateway: fd01::1
+    enable_ipv6: false

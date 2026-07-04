@@ -742,129 +742,83 @@ const handlePaste = () => {
 const triggerFileUpload = () => { fileInputRef.value?.click(); };
 
 // --- 下载触发器 (定义在此处，供 Composable 使用) ---
-const triggerDownload = (items: FileListItem[]) => { // 修改：接受 FileListItem 数组
-    // 恢复使用 props.wsDeps.isConnected
-    if (!props.wsDeps.isConnected.value) {
+const isDownloading = ref(false);
+
+const triggerDownload = async (items: FileListItem[]) => {
+    if (!props.wsDeps.isConnected.value || !currentSftpManager.value || !props.dbConnectionId) {
         return;
     }
-    // connectionId 仍然从 props 获取
-    const currentConnectionId = props.dbConnectionId;
-    if (!currentConnectionId) {
-        console.error(`[FileManager ${props.sessionId}-${props.instanceId}] Cannot download: Missing connection ID.`);
-        return;
-    }
-    // 修改：简化检查
-    if (!currentSftpManager.value) {
-        console.error(`[FileManager ${props.sessionId}-${props.instanceId}] Cannot download: SFTP manager is not available.`);
-        return;
-    }
-
-    // 遍历数组中的每个文件项
-    items.forEach(item => {
-        // 确保只下载文件
-        if (!item.attrs.isFile) {
-            console.warn(`[FileManager ${props.sessionId}-${props.instanceId}] Skipping download for non-file item: ${item.filename}`);
-            return;
-        }
-
-        const downloadPath = currentSftpManager.value!.joinPath(currentSftpManager.value!.currentPath.value, item.filename);
-        const downloadUrl = `/api/v1/sftp/download?connectionId=${currentConnectionId}&remotePath=${encodeURIComponent(downloadPath)}`;
-        console.log(`[FileManager ${props.sessionId}-${props.instanceId}] Triggering download for ${item.filename}: ${downloadUrl}`);
-
-        // 为每个文件创建一个链接并点击
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        // --- 修正：移除文件名中的双引号以兼容 Chrome ---
-        const safeFilename = item.filename.replace(/"/g, ''); // 移除所有双引号
-        link.setAttribute('download', safeFilename);
-        // --- 结束修正 ---
-        document.body.appendChild(link);
-        link.click();
-
-        // 稍微延迟移除链接，以确保下载开始
-        setTimeout(() => {
+    if (isDownloading.value) return;
+    isDownloading.value = true;
+    try {
+        for (const item of items) {
+            if (!item.attrs.isFile) continue;
+            const downloadPath = currentSftpManager.value.joinPath(currentSftpManager.value.currentPath.value, item.filename);
+            const downloadUrl = `/api/v1/sftp/download?connectionId=${props.dbConnectionId}&remotePath=${encodeURIComponent(downloadPath)}`;
+            const response = await fetch(downloadUrl);
+            if (!response.ok) {
+                let errMsg = `HTTP ${response.status}`;
+                try { const d = await response.json(); errMsg = d.message || errMsg; } catch {}
+                uiNotificationsStore.showError(`下载 ${item.filename} 失败: ${errMsg}`);
+                continue;
+            }
+            const blob = await response.blob();
+            const safeFilename = item.filename.replace(/"/g, '');
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute('download', safeFilename);
+            document.body.appendChild(link);
+            link.click();
             document.body.removeChild(link);
-        }, 100);
-    });
+            URL.revokeObjectURL(link.href);
+        }
+    } finally {
+        isDownloading.value = false;
+    }
 };
 
 
-// +++ 文件夹下载触发器 +++
-const triggerDownloadDirectory = (item: FileListItem) => {
-    if (!props.wsDeps.isConnected.value) {
+const triggerDownloadDirectory = async (item: FileListItem) => {
+    if (!props.wsDeps.isConnected.value || !currentSftpManager.value || !props.dbConnectionId) {
         return;
     }
-    const currentConnectionId = props.dbConnectionId;
-    if (!currentConnectionId) {
-        console.error(`[FileManager ${props.sessionId}-${props.instanceId}] Cannot download directory: Missing connection ID.`);
-        return;
-    }
-    if (!currentSftpManager.value) {
-        console.error(`[FileManager ${props.sessionId}-${props.instanceId}] Cannot download directory: SFTP manager is not available.`);
-        return;
-    }
-
-    // 确保是目录
-    if (!item.attrs.isDirectory) {
-        console.warn(`[FileManager ${props.sessionId}-${props.instanceId}] Skipping directory download for non-directory item: ${item.filename}`);
-        return;
-    }
+    if (!item.attrs.isDirectory) return;
+    if (isDownloading.value) return;
 
     const directoryPath = currentSftpManager.value.joinPath(currentSftpManager.value.currentPath.value, item.filename);
-    // 定义新的后端 API 端点 URL (稍后实现)
-    const downloadUrl = `/api/v1/sftp/download-directory?connectionId=${currentConnectionId}&remotePath=${encodeURIComponent(directoryPath)}`;
+    const downloadUrl = `/api/v1/sftp/download-directory?connectionId=${props.dbConnectionId}&remotePath=${encodeURIComponent(directoryPath)}`;
 
-    console.log(`[FileManager ${props.sessionId}-${props.instanceId}] Attempting directory download for ${item.filename}: ${downloadUrl}`);
-
-    // --- 修改：使用 fetch 尝试下载，并处理后端未实现的情况 ---
-    fetch(downloadUrl)
-        .then(async response => {
-            if (response.ok) {
-                // 后端实现成功，尝试触发下载
-                const blob = await response.blob();
-                // 从 Content-Disposition 头获取文件名 (需要后端设置)
-                const contentDisposition = response.headers.get('content-disposition');
-                let filename = `${item.filename}.zip`; // 默认文件名
-                if (contentDisposition) {
-                    const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
-                    if (filenameMatch && filenameMatch.length > 1) {
-                        filename = filenameMatch[1];
-                    }
-                }
-
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                // --- 修正：移除 ZIP 文件名中的双引号以兼容 Chrome ---
-                const safeZipFilename = filename.replace(/"/g, '');
-                link.setAttribute('download', safeZipFilename);
-                // --- 结束修正 ---
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(link.href); // 释放对象 URL
-                console.log(`[FileManager ${props.sessionId}-${props.instanceId}] Directory download triggered for: ${filename}`);
-            } else {
-                // 处理错误，例如 404 Not Found
-                console.error(`[FileManager ${props.sessionId}-${props.instanceId}] Directory download failed: ${response.status} ${response.statusText}`);
-                // 尝试读取错误信息体
-                let errorMsg = `Server responded with status ${response.status}`;
-                try {
-                    const errorData = await response.json(); // 假设后端返回 JSON 错误
-                    errorMsg = errorData.message || errorMsg;
-                } catch (e) {
-                    // 如果响应体不是 JSON 或读取失败
-                    try {
-                       const textError = await response.text();
-                       if (textError) errorMsg = textError;
-                    } catch (e2) { /* ignore */}
-                }
-
+    isDownloading.value = true;
+    try {
+        const response = await fetch(downloadUrl);
+        if (!response.ok) {
+            let errMsg = `HTTP ${response.status}`;
+            try { const d = await response.json(); errMsg = d.message || errMsg; } catch { try { const t = await response.text(); if (t) errMsg = t; } catch {} }
+            uiNotificationsStore.showError(`下载目录 ${item.filename} 失败: ${errMsg}`);
+            return;
+        }
+        const blob = await response.blob();
+        const contentDisposition = response.headers.get('content-disposition');
+        let filename = `${item.filename}.zip`;
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+            if (filenameMatch && filenameMatch[1]) {
+                filename = filenameMatch[1].replace(/['"]/g, '');
             }
-        })
-        .catch(error => {
-            console.error(`[FileManager ${props.sessionId}-${props.instanceId}] Network error during directory download:`, error);
-        });
-    
+        }
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.setAttribute('download', filename.replace(/"/g, ''));
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+    } catch (error: any) {
+        console.error(`[FileManager ${props.sessionId}-${props.instanceId}] Directory download failed:`, error);
+        uiNotificationsStore.showError(`下载目录 ${item.filename} 失败: ${error.message}`);
+    } finally {
+        isDownloading.value = false;
+    }
 };
 
 
@@ -1642,7 +1596,7 @@ const handleOpenEditorClick = () => {
    showFavoritePathsModal.value = !showFavoritePathsModal.value;
    console.log(`[FileManager ${props.sessionId}-${props.instanceId}] Toggled FavoritePathsModal. Visible: ${showFavoritePathsModal.value}`);
  };
- 
+
  const handleNavigateToPathFromFavorites = (path: string) => {
    if (currentSftpManager.value) {
      currentSftpManager.value.loadDirectory(path);
@@ -1653,185 +1607,166 @@ const handleOpenEditorClick = () => {
 
 <template>
   <div class="flex flex-col h-full overflow-hidden bg-background text-foreground text-sm font-sans">
-    <div class="flex items-center justify-between flex-wrap gap-2 p-2 bg-header  flex-shrink-0">
-        <!-- Wrapper for Path Actions and Path Bar -->
-        <div class="flex items-center gap-2 flex-grow min-w-0"> <!-- Added gap-2, flex-grow, min-w-0 -->
-            <!-- Path Actions -->
-            <div class="flex items-center flex-shrink-0"> <!-- Removed mr-auto -->
-              <!-- CD 到终端按钮 -->
-              <button
-                class="flex items-center justify-center w-7 h-7 text-text-secondary rounded transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-black/10 hover:enabled:text-foreground"
-                @click.stop="sendCdCommandToTerminal"
-                :disabled="!currentSftpManager || !props.wsDeps.isConnected.value || isEditingPath"
-                :title="t('fileManager.actions.cdToTerminal', 'Change terminal directory to current path')"
-              >
-                <i class="fas fa-terminal text-base"></i>
-              </button>
-              <!-- 刷新按钮 -->
-              <button
-                class="flex items-center justify-center w-7 h-7 text-text-secondary rounded transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-black/10 hover:enabled:text-foreground"
-                @click.stop="currentSftpManager?.loadDirectory(currentSftpManager?.currentPath?.value ?? '/', true)"
-                :disabled="!currentSftpManager || !props.wsDeps.isConnected.value || isEditingPath"
-                :title="t('fileManager.actions.refresh')"
-              >
-                <i class="fas fa-sync-alt text-base"></i>
-              </button>
-              <button
-                class="flex items-center justify-center w-7 h-7 text-text-secondary rounded transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-black/10 hover:enabled:text-foreground"
-                @click.stop="handleItemClick($event, { filename: '..', longname: '..', attrs: { isDirectory: true, isFile: false, isSymbolicLink: false, size: 0, uid: 0, gid: 0, mode: 0, atime: 0, mtime: 0 } })"
-                :disabled="!currentSftpManager || !props.wsDeps.isConnected.value || currentSftpManager?.currentPath?.value === '/' || isEditingPath"
-                :title="t('fileManager.actions.parentDirectory')"
-              >
-                <i class="fas fa-arrow-up text-base"></i>
-              </button>
-             <!-- Search Area -->
-             <div class="flex items-center flex-shrink-0">
-                 <button
-                     v-if="!isSearchActive"
-                     class="flex items-center justify-center w-7 h-7 text-text-secondary rounded transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-black/10 hover:enabled:text-foreground"
-                     @click.stop="activateSearch"
-                     :disabled="!currentSftpManager || !props.wsDeps.isConnected.value"
-                     :title="t('fileManager.searchPlaceholder')"
-                 >
-                     <i class="fas fa-search text-base"></i>
-                 </button>
-                 <div v-else class="relative flex items-center min-w-[150px] flex-shrink">
-                     <i class="fas fa-search absolute left-2 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none"></i>
-                     <input
-                         ref="searchInputRef"
-                         type="text"
-                         v-model="searchQuery"
-                         :placeholder="t('fileManager.searchPlaceholder')"
-                         class="flex-grow bg-background border border-border rounded pl-7 pr-2 py-1 text-foreground text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary min-w-[10px] transition-colors duration-200"
-                         data-focus-id="fileManagerSearch"
-                         @blur="deactivateSearch"
-                         @keyup.esc="cancelSearch"
-                         @keydown.up.prevent="handleKeydown"
-                         @keydown.down.prevent="handleKeydown"
-                         @keydown.enter.prevent="handleKeydown"
-                     />
-                     <!-- Optional: Clear button -->
-                     <!-- <button @click="searchQuery = ''; searchInputRef?.focus()" v-if="searchQuery" class="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-foreground">&times;</button> -->
-                 </div>
-             </div>
-             <div class="relative flex-shrink-0">
-              <!-- Favorite Paths Button -->
-              <button
-                  ref="favoritePathsButtonRef"
-                  class="flex items-center justify-center w-7 h-7 text-text-secondary rounded transition-colors duration-200 hover:enabled:bg-black/10 hover:enabled:text-foreground"
-                  @click="toggleFavoritePathsModal"
-              >
-                  <i class="fas fa-star text-base"></i>
-              </button>
-              <!-- Favorite Paths Modal -->
-              <FavoritePathsModal
-                :is-visible="showFavoritePathsModal"
-                :trigger-element="favoritePathsButtonRef"
-                @close="showFavoritePathsModal = false"
-                @navigate-to-path="handleNavigateToPathFromFavorites"
-              />
-            </div>
-            </div> 
+    <div class="flex items-center gap-2 p-2 bg-header flex-shrink-0">
+        <!-- Path Actions -->
+        <div class="flex items-center flex-shrink-0">
+          <button
+            class="flex items-center justify-center w-7 h-7 text-text-secondary rounded transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-black/10 hover:enabled:text-foreground"
+            @click.stop="sendCdCommandToTerminal"
+            :disabled="!currentSftpManager || !props.wsDeps.isConnected.value || isEditingPath"
+            :title="t('fileManager.actions.cdToTerminal', 'Change terminal directory to current path')"
+          >
+            <i class="fas fa-terminal text-base"></i>
+          </button>
+          <button
+            class="flex items-center justify-center w-7 h-7 text-text-secondary rounded transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-black/10 hover:enabled:text-foreground"
+            @click.stop="currentSftpManager?.loadDirectory(currentSftpManager?.currentPath?.value ?? '/', true)"
+            :disabled="!currentSftpManager || !props.wsDeps.isConnected.value || isEditingPath"
+            :title="t('fileManager.actions.refresh')"
+          >
+            <i class="fas fa-sync-alt text-base"></i>
+          </button>
+          <button
+            class="flex items-center justify-center w-7 h-7 text-text-secondary rounded transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-black/10 hover:enabled:text-foreground"
+            @click.stop="handleItemClick($event, { filename: '..', longname: '..', attrs: { isDirectory: true, isFile: false, isSymbolicLink: false, size: 0, uid: 0, gid: 0, mode: 0, atime: 0, mtime: 0 } })"
+            :disabled="!currentSftpManager || !props.wsDeps.isConnected.value || currentSftpManager?.currentPath?.value === '/' || isEditingPath"
+            :title="t('fileManager.actions.parentDirectory')"
+          >
+            <i class="fas fa-arrow-up text-base"></i>
+          </button>
+          <div class="relative flex-shrink-0">
+            <button
+                ref="favoritePathsButtonRef"
+                class="flex items-center justify-center w-7 h-7 text-text-secondary rounded transition-colors duration-200 hover:enabled:bg-black/10 hover:enabled:text-foreground"
+                @click="toggleFavoritePathsModal"
+            >
+                <i class="fas fa-star text-base"></i>
+            </button>
+            <FavoritePathsModal
+              :is-visible="showFavoritePathsModal"
+              :trigger-element="favoritePathsButtonRef"
+              @close="showFavoritePathsModal = false"
+              @navigate-to-path="handleNavigateToPathFromFavorites"
+            />
+          </div>
+          <button
+            class="flex items-center justify-center w-7 h-7 text-text-secondary rounded transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-black/10 hover:enabled:text-foreground"
+            @click.stop="triggerFileUpload"
+            :disabled="!currentSftpManager || !props.wsDeps.isConnected.value"
+            :title="t('fileManager.actions.upload')"
+          >
+            <i class="fas fa-upload text-base"></i>
+          </button>
+          <button
+            class="flex items-center justify-center w-7 h-7 text-text-secondary rounded transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-black/10 hover:enabled:text-foreground"
+            @click.stop="handleNewFolderContextMenuClick"
+            :disabled="!currentSftpManager || !props.wsDeps.isConnected.value"
+            :title="t('fileManager.actions.newFolder')"
+          >
+            <i class="fas fa-folder-plus text-base"></i>
+          </button>
+          <button
+            class="flex items-center justify-center w-7 h-7 text-text-secondary rounded transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-black/10 hover:enabled:text-foreground"
+            @click.stop="handleNewFileContextMenuClick"
+            :disabled="!currentSftpManager || !props.wsDeps.isConnected.value"
+            :title="t('fileManager.actions.newFile')"
+          >
+            <i class="fas fa-file text-base"></i>
+          </button>
+        </div>
+        <div class="flex-grow"></div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <input type="file" ref="fileInputRef" @change="handleFileSelected" multiple class="hidden" />
+          <button
+            v-if="showPopupFileEditorBoolean"
+            @click="openPopupEditor"
+            :disabled="!currentSftpManager || !props.wsDeps.isConnected.value"
+            :title="t('fileManager.actions.openEditor', 'Open Popup Editor')"
+            class="flex items-center gap-1 px-2.5 py-1 bg-background border border-border rounded text-foreground text-xs transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-header hover:enabled:border-primary hover:enabled:text-primary"
+            :class="{ 'px-1.5': props.isMobile }"
+          >
+            <i class="far fa-edit text-sm"></i>
+            <span v-if="!props.isMobile">{{ t('fileManager.actions.openEditor', 'Open Editor') }}</span>
+          </button>
+          <button
+            v-if="props.isMobile"
+            @click="toggleMultiSelectMode"
+            :title="isMultiSelectMode ? t('fileManager.actions.exitMultiSelect', 'Exit Multi-Select Mode') : t('fileManager.actions.multiSelect', 'Enter Multi-Select Mode')"
+            class="flex items-center gap-1 px-1.5 py-1 bg-background border border-border rounded text-foreground text-xs transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            :class="{
+              'hover:bg-header hover:border-primary hover:text-primary': !isMultiSelectMode,
+              'bg-primary text-white border-primary': isMultiSelectMode
+            }"
+          >
+            <i class="fas fa-check-square text-sm"></i>
+          </button>
+        </div>
+    </div>
 
-            
-
-           
-            <div ref="pathInputWrapperRef" class="relative flex items-center bg-background border border-border rounded px-1.5 py-0.5"
-                 :class="{ 'flex-grow min-w-0': isEditingPath || showPathHistoryDropdown, 'w-fit max-w-full': !isEditingPath && !showPathHistoryDropdown }">
-              <span v-show="!isEditingPath && !showPathHistoryDropdown" @click="startPathEdit" class="text-text-secondary pr-2 cursor-text truncate">
-                <strong
-                  :title="t('fileManager.editPathTooltip')"
-                  class="font-medium text-link px-1 rounded transition-colors duration-200"
-                  :class="{
-                    'hover:bg-black/5': currentSftpManager && props.wsDeps.isConnected.value,
-                    'opacity-60 cursor-not-allowed': !currentSftpManager || !props.wsDeps.isConnected.value
-                  }"
-                >
-                  {{ currentSftpManager?.currentPath?.value ?? '/' }}
-                </strong>
-              </span>
-              <input
-                v-show="isEditingPath || showPathHistoryDropdown"
-                ref="pathInputRef"
-                type="text"
-                v-model="editablePath"
-                class="flex-grow bg-transparent text-foreground p-0.5 outline-none min-w-[100px]"
-                data-focus-id="fileManagerPathInput"
-                @focus="handlePathInputFocus"
-                @input="handlePathInputChange"
-                @keydown="handlePathInputKeydown"
-                @blur="handlePathInput"
-              />
-              <PathHistoryDropdown
-                v-if="showPathHistoryDropdown"
-                ref="pathHistoryDropdownRef"
-                @pathSelected="handlePathSelectedFromDropdown"
-                @closeDropdown="closePathHistory"
-                class="left-0 right-0 top-full mt-1"
-              />
+    <div class="flex items-center gap-2 px-2 pb-2 bg-header flex-shrink-0">
+        <!-- Search Area -->
+        <div class="flex items-center flex-shrink-0">
+            <button
+                v-if="!isSearchActive"
+                class="flex items-center justify-center w-7 h-7 text-text-secondary rounded transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-black/10 hover:enabled:text-foreground"
+                @click.stop="activateSearch"
+                :disabled="!currentSftpManager || !props.wsDeps.isConnected.value"
+                :title="t('fileManager.searchPlaceholder')"
+            >
+                <i class="fas fa-search text-base"></i>
+            </button>
+            <div v-else class="relative flex items-center min-w-[150px] flex-shrink">
+                <i class="fas fa-search absolute left-2 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none"></i>
+                <input
+                    ref="searchInputRef"
+                    type="text"
+                    v-model="searchQuery"
+                    :placeholder="t('fileManager.searchPlaceholder')"
+                    class="flex-grow bg-background border border-border rounded pl-7 pr-2 py-1 text-foreground text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary min-w-[10px] transition-colors duration-200"
+                    data-focus-id="fileManagerSearch"
+                    @blur="deactivateSearch"
+                    @keyup.esc="cancelSearch"
+                    @keydown.up.prevent="handleKeydown"
+                    @keydown.down.prevent="handleKeydown"
+                    @keydown.enter.prevent="handleKeydown"
+                />
             </div>
-        </div> <!-- End Wrapper -->
-       <!-- Main Actions Bar -->
-       <div class="flex items-center gap-2 flex-shrink-0">
-            <input type="file" ref="fileInputRef" @change="handleFileSelected" multiple class="hidden" />
-            <!-- 打开编辑器按钮 -->
-            <button
-              v-if="showPopupFileEditorBoolean"
-              @click="openPopupEditor"
-              :disabled="!currentSftpManager || !props.wsDeps.isConnected.value"
-              :title="t('fileManager.actions.openEditor', 'Open Popup Editor')"
-              class="flex items-center gap-1 px-2.5 py-1 bg-background border border-border rounded text-foreground text-xs transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-header hover:enabled:border-primary hover:enabled:text-primary"
-              :class="{ 'px-1.5': props.isMobile }"
-            >
-              <i class="far fa-edit text-sm"></i> <!-- 使用编辑图标 -->
-              <span v-if="!props.isMobile">{{ t('fileManager.actions.openEditor', 'Open Editor') }}</span> <!-- 添加 i18n key -->
-            </button>
-            <!-- 上传按钮 -->
-            <button
-              @click="triggerFileUpload"
-              :disabled="!currentSftpManager || !props.wsDeps.isConnected.value"
-              :title="t('fileManager.actions.uploadFile')"
-              class="flex items-center gap-1 px-2.5 py-1 bg-background border border-border rounded text-foreground text-xs transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-header hover:enabled:border-primary hover:enabled:text-primary"
-              :class="{ 'px-1.5': props.isMobile }"
-            >
-              <i class="fas fa-upload text-sm"></i>
-              <span v-if="!props.isMobile">{{ t('fileManager.actions.upload') }}</span>
-            </button>
-            <button
-              @click="handleNewFolderContextMenuClick"
-              :disabled="!currentSftpManager || !props.wsDeps.isConnected.value"
-              :title="t('fileManager.actions.newFolder')"
-              class="flex items-center gap-1 px-2.5 py-1 bg-background border border-border rounded text-foreground text-xs transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-header hover:enabled:border-primary hover:enabled:text-primary"
-              :class="{ 'px-1.5': props.isMobile }"
-            >
-              <i class="fas fa-folder-plus text-sm"></i>
-              <span v-if="!props.isMobile">{{ t('fileManager.actions.newFolder') }}</span>
-            </button>
-            <button
-              @click="handleNewFileContextMenuClick"
-              :disabled="!currentSftpManager || !props.wsDeps.isConnected.value"
-              :title="t('fileManager.actions.newFile')"
-              class="flex items-center gap-1 px-2.5 py-1 bg-background border border-border rounded text-foreground text-xs transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-header hover:enabled:border-primary hover:enabled:text-primary"
-              :class="{ 'px-1.5': props.isMobile }"
-            >
-              <i class="far fa-file-alt text-sm"></i>
-              <span v-if="!props.isMobile">{{ t('fileManager.actions.newFile') }}</span>
-            </button>
-            <!-- 多选模式切换按钮 (仅移动端) -->
-            <button
-              v-if="props.isMobile"
-              @click="toggleMultiSelectMode"
-              :title="isMultiSelectMode ? t('fileManager.actions.exitMultiSelect', 'Exit Multi-Select Mode') : t('fileManager.actions.multiSelect', 'Enter Multi-Select Mode')"
-              class="flex items-center gap-1 px-1.5 py-1 bg-background border border-border rounded text-foreground text-xs transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+        </div>
+        <div ref="pathInputWrapperRef" class="relative flex items-center bg-background border border-border rounded px-1.5 py-0.5 flex-grow min-w-0"
+             :class="{ 'flex-grow min-w-0': isEditingPath || showPathHistoryDropdown, 'w-fit max-w-full': !isEditingPath && !showPathHistoryDropdown }">
+          <span v-show="!isEditingPath && !showPathHistoryDropdown" @click="startPathEdit" class="text-text-secondary pr-2 cursor-text truncate">
+            <strong
+              :title="t('fileManager.editPathTooltip')"
+              class="font-medium text-link px-1 rounded transition-colors duration-200"
               :class="{
-                'hover:bg-header hover:border-primary hover:text-primary': !isMultiSelectMode,
-                'bg-primary text-white border-primary': isMultiSelectMode
+                'hover:bg-black/5': currentSftpManager && props.wsDeps.isConnected.value,
+                'opacity-60 cursor-not-allowed': !currentSftpManager || !props.wsDeps.isConnected.value
               }"
             >
-              <i class="fas fa-check-square text-sm"></i>
-            </button>
-         </div>
-     </div>
+              {{ currentSftpManager?.currentPath?.value ?? '/' }}
+            </strong>
+          </span>
+          <input
+            v-show="isEditingPath || showPathHistoryDropdown"
+            ref="pathInputRef"
+            type="text"
+            v-model="editablePath"
+            class="flex-grow bg-transparent text-foreground p-0.5 outline-none min-w-[100px]"
+            data-focus-id="fileManagerPathInput"
+            @focus="handlePathInputFocus"
+            @input="handlePathInputChange"
+            @keydown="handlePathInputKeydown"
+            @blur="handlePathInput"
+          />
+          <PathHistoryDropdown
+            v-if="showPathHistoryDropdown"
+            ref="pathHistoryDropdownRef"
+            @pathSelected="handlePathSelectedFromDropdown"
+            @closeDropdown="closePathHistory"
+            class="left-0 right-0 top-full mt-1"
+          />
+        </div>
+    </div>
 
 
     <!-- File List Container -->
