@@ -92,7 +92,8 @@ const closeFavoriteContextMenu = () => {
 };
 
 const handleItemClick = (pathItem: FavoritePathItem) => {
-  handleSendToTerminal(pathItem);
+  emit('navigateToPath', pathItem.path);
+  closeModal();
 };
 
 const openEditModal = (pathItem: FavoritePathItem) => {
