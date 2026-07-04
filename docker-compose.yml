@@ -1,7 +1,10 @@
 services:
   frontend:
-    image: heavrnl/nexus-terminal-frontend:latest
+    image: xvzu/nexus-terminal-frontend:latest
     container_name: nexus-terminal-frontend
+    build:
+      context: .
+      dockerfile: packages/frontend/Dockerfile
     ports:
       - "18111:80"
     depends_on:
@@ -11,8 +14,11 @@ services:
       - nexus-terminal-network
 
   backend:
-    image: heavrnl/nexus-terminal-backend:latest
+    image: xvzu/nexus-terminal-backend:latest
     container_name: nexus-terminal-backend
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
     env_file:
       - .env
     environment:
@@ -25,8 +31,11 @@ services:
     restart: unless-stopped
 
   remote-gateway:
-    image: heavrnl/nexus-terminal-remote-gateway:latest
+    image: xvzu/nexus-terminal-remote-gateway:latest
     container_name: nexus-terminal-remote-gateway
+    build:
+      context: .
+      dockerfile: packages/remote-gateway/Dockerfile
     environment:
       GUACD_HOST: guacd
       GUACD_PORT: 4822
