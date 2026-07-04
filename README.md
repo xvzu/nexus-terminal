@@ -3,11 +3,9 @@
 
 <div align="center">
 
-[![Docker](https://img.shields.io/badge/-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)][docker-url] [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-4CAF50?style=flat-square)](https://github.com/Heavrnl/nexus-terminal/blob/main/LICENSE)
+[![Docker](https://img.shields.io/badge/-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/xvzu/nexus-terminal) [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-4CAF50?style=flat-square)](https://github.com/xvzu/nexus-terminal/blob/main/LICENSE)
 <br>
 [中文](./README.md) | [English](./doc/README_EN.md)
-
-[docker-url]: https://hub.docker.com/r/heavrnl/nexus-terminal-frontend
 
 </div>
 
@@ -56,37 +54,27 @@
 ---
 
 
-## 🖥️ 桌面端
-
-> 移除了web端的特有功能，如各种登录验证，会话挂起等功能
-
-https://github.com/Heavrnl/nexus-terminal/releases/latest
-
 ## 🚀 快速开始
 
-### 1️⃣ 配置环境
+### 1️⃣ 克隆仓库
 
-> 建议在 Debian（AMD64 架构）环境中部署，因本人无 ARM 设备，无法保证其兼容性。
-
-新建文件夹
 ```bash
-mkdir ./nexus-terminal && cd ./nexus-terminal
+git clone https://github.com/xvzu/nexus-terminal.git
+cd nexus-terminal
 ```
 
 
-下载仓库中的 [**docker-compose.yml**](https://raw.githubusercontent.com/Heavrnl/nexus-terminal/refs/heads/main/docker-compose.yml) 和 [**.env**](https://raw.githubusercontent.com/Heavrnl/nexus-terminal/refs/heads/main/.env) 文件到当前目录。
+
+### 2️⃣ 配置 Docker IPv6（可选）
+
+如需通过容器连接 IPv6 服务器，只需执行一次：
 ```bash
-wget https://raw.githubusercontent.com/Heavrnl/nexus-terminal/refs/heads/main/docker-compose.yml -O docker-compose.yml && wget https://raw.githubusercontent.com/Heavrnl/nexus-terminal/refs/heads/main/.env -O .env
+sudo ./scripts/setup-docker-ipv6.sh
 ```
-> ⚠️ **注意：**
->
-> * **arm64 用户**请将 `docker-compose.yml` 中的镜像 `guacamole/guacd:latest` 替换为 `guacamole/guacd:1.6.0-RC1`。
-> * **armv7 用户**请参考下方注意事项。
 
+### 3️⃣ 配置反代
 
-
-
-配置 nginx
+宿主机 nginx 配置参考：
 ```conf
 location / {
     proxy_http_version 1.1;
@@ -103,40 +91,19 @@ location / {
 }
 ```
 
-
-
-为 docker 配置IPv6（可选，如果你不使用ipv6连接服务器可以不配置）
-
-在`/etc/docker/daemon.json`加入以下内容
-```json
-{
-  "ipv6": true,
-  "fixed-cidr-v6": "fd00::/80",
-  "ip6tables": true,
-  "experimental": true
-}
-```
-重启docker服务
-```
-sudo systemctl restart docker
-```
-
-### 2️⃣ 启动服务
+### 4️⃣ 构建 & 启动
 
 ```bash
 docker compose up -d
 ```
 
-### 3️⃣ 更新
-注意：docker-compose 运行不需要拉取仓库源码，除非你打算自己build，否则只需要在项目目录执行以下命令即可更新。
+首次运行会自动构建镜像，之后启动直接使用缓存。
+
+### 更新
+
 ```bash
-docker compose down
-```
-```bash
-docker compose pull
-```
-```bash
-docker compose up -d
+git pull
+docker compose up -d --build
 ```
 ## 📚 使用指南
 
@@ -182,7 +149,7 @@ docker compose up -d
 
 1.  **双文件管理器**：可以在布局中添加两个文件管理器组件（实验性功能，可能存在不稳定情况）。
 2.  **多文本编辑器**：在同一布局中添加多个文本编辑器的功能尚未实现。
-3. ARMv7 用户请使用此处的 [docker-compose.yml](https://github.com/Heavrnl/nexus-terminal/blob/main/doc/arm/docker-compose.yml)。由于 Apache Guacamole 未提供 guacd 的 ARMv7 架构镜像，所以禁用 RDP 功能，相关镜像暂时不再拉取。
+3. ARMv7 用户请使用此处的 [docker-compose.yml](https://github.com/xvzu/nexus-terminal/blob/main/doc/arm/docker-compose.yml)。由于 Apache Guacamole 未提供 guacd 的 ARMv7 架构镜像，所以禁用 RDP 功能，相关镜像暂时不再拉取。
 4. 关于数据备份，请自行备份目录下的 data 文件夹，本项目不提供相关备份功能。
 5. 由于浏览器限制，非https或者localhost无法复制终端内容，请使用https访问
 
