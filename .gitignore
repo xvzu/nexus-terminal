@@ -181,3 +181,4 @@ packages/desktop/src-tauri/gen/
 packages/backend/public/
 packages/backend/.env
 packages/backend/src/sync/__test_e2e_sync.ts
+.env
