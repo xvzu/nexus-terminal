@@ -1064,12 +1064,12 @@ const cancelEditingTag = () => {
               </button>
            </div>
             <!-- Connection Items List -->
-            <ul v-show="expandedGroups[groupData.groupName]" class="list-none p-0 m-0 pl-3">
+            <ul v-show="expandedGroups[groupData.groupName]" class="list-none p-0 m-0 pl-3 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }">
               <!-- ... li v-for="conn in groupData.connections" ... -->
                <li
                  v-for="conn in groupData.connections"
                  :key="conn.id"
-                 class="group my-0.5 py-2 pr-3 pl-4 cursor-pointer flex items-center rounded-md whitespace-nowrap overflow-hidden text-ellipsis text-foreground transition-all duration-150"
+                 class="group my-0.5 py-2 pr-3 pl-4 cursor-pointer flex items-center rounded-md overflow-hidden text-foreground transition-all duration-150 min-w-0"
                  :class="[
                    getEffectiveConnectionColor(conn) ? 'connection-item-colored' : 'hover:bg-primary/10',
                    { 'bg-primary/20 font-medium': !getEffectiveConnectionColor(conn) && conn.id === highlightedConnectionId }
@@ -1092,11 +1092,11 @@ const cancelEditingTag = () => {
             </div>
           </div>
           <!-- Flat View -->
-          <ul v-else class="list-none p-0 m-0">
+          <ul v-else class="list-none p-0 m-0 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }">
               <li
                 v-for="conn in flatFilteredConnections"
                 :key="conn.id"
-                class="group my-0.5 py-2 pr-3 pl-4 cursor-pointer flex items-center rounded-md whitespace-nowrap overflow-hidden text-ellipsis text-foreground transition-all duration-150"
+                class="group my-0.5 py-2 pr-3 pl-4 cursor-pointer flex items-center rounded-md overflow-hidden text-foreground transition-all duration-150 min-w-0"
                 :class="[
                   getEffectiveConnectionColor(conn) ? 'connection-item-colored' : 'hover:bg-primary/10',
                   { 'bg-primary/20 font-medium': !getEffectiveConnectionColor(conn) && conn.id === highlightedConnectionId }
