@@ -1085,7 +1085,7 @@ const cancelEditingTag = () => {
               </button>
            </div>
             <!-- Connection Items List -->
-            <ul v-show="expandedGroups[groupData.groupName]" class="list-none p-0 m-0 pl-3 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }">
+            <ul v-show="expandedGroups[groupData.groupName]" class="list-none p-0 m-0 pl-3 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }">
               <!-- ... li v-for="conn in groupData.connections" ... -->
                <li
                  v-for="conn in groupData.connections"
@@ -1109,7 +1109,7 @@ const cancelEditingTag = () => {
             </div>
           </div>
           <!-- Flat View -->
-          <ul v-else class="list-none p-0 m-0 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }">
+          <ul v-else class="list-none p-0 m-0 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }">
               <li
                 v-for="conn in flatFilteredConnections"
                 :key="conn.id"
