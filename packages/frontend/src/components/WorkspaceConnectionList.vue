@@ -64,6 +64,27 @@ const handleWheel = (event: WheelEvent) => {
   setZoom(rowSizeMultiplier.value + delta);
 };
 
+// 未设专属色的连接：按 id 稳定随机粉彩渐变底
+const GRADIENT_PAIRS: Array<[string, string]> = [
+  ['#bfdbfe', '#e9d5ff'],
+  ['#bbf7d0', '#fef6d5'],
+  ['#fecaca', '#fde68a'],
+  ['#bae6fd', '#c7d2fe'],
+  ['#fbcfe8', '#ddd6fe'],
+  ['#a7f3d0', '#fef9c3'],
+  ['#fed7aa', '#fecdd3'],
+  ['#ddd6fe', '#bfdbfe'],
+  ['#fecdd3', '#fef6d5'],
+  ['#c7d2fe', '#bbf7d0'],
+];
+const connGradient = (conn: ConnectionInfo): string => {
+  let h = 0;
+  const s = String(conn.id);
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  const pair = GRADIENT_PAIRS[h % GRADIENT_PAIRS.length];
+  return `linear-gradient(135deg, ${pair[0]}, ${pair[1]})`;
+};
+
 // 计算带背景颜色的连接项样式
 const getConnectionItemStyle = (conn: ConnectionInfo, isHighlighted: boolean) => {
   const effectiveColor = getEffectiveConnectionColor(conn);
@@ -73,7 +94,7 @@ const getConnectionItemStyle = (conn: ConnectionInfo, isHighlighted: boolean) =>
     paddingBottom: `calc(0.5rem * ${m0})`,
     fontSize: `calc(0.875rem * ${Math.max(0.85, m0 * 0.6 + 0.4)})`,
   };
-  if (!effectiveColor) return zoomStyle;
+  if (!effectiveColor) return { ...zoomStyle, background: connGradient(conn), color: '#1f2937' };
   const bg = hexToRgba(effectiveColor, isHighlighted ? 0.28 : 0.12);
   const hoverBg = hexToRgba(effectiveColor, 0.22);
   const border = hexToRgba(effectiveColor, 0.25);
@@ -1080,11 +1101,7 @@ const cancelEditingTag = () => {
                  @click.right.prevent
                  @contextmenu.prevent="showContextMenu($event, conn)"
                >
-                 <i
-                   :class="['fas', conn.type === 'RDP' ? 'fa-desktop' : (conn.type === 'VNC' ? 'fa-plug' : 'fa-server'), 'mr-2.5 w-4 text-center', getEffectiveConnectionColor(conn) ? '' : 'text-text-secondary group-hover:text-primary', { 'text-white': !getEffectiveConnectionColor(conn) && conn.id === highlightedConnectionId }]"
-                   :style="getEffectiveConnectionColor(conn) ? { color: getEffectiveConnectionColor(conn)! } : {}"
-                 ></i>
-                 <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm" :title="conn.name || conn.host">
+                 <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm font-medium" :title="conn.name || conn.host">
                    {{ conn.name || conn.host }}
                  </span>
                </li>
@@ -1107,11 +1124,7 @@ const cancelEditingTag = () => {
                 @click.right.prevent
                 @contextmenu.prevent="showContextMenu($event, conn)"
               >
-                <i
-                  :class="['fas', conn.type === 'RDP' ? 'fa-desktop' : (conn.type === 'VNC' ? 'fa-chalkboard' : 'fa-server'), 'mr-2.5 w-4 text-center', getEffectiveConnectionColor(conn) ? '' : 'text-text-secondary group-hover:text-primary', { 'text-white': !getEffectiveConnectionColor(conn) && conn.id === highlightedConnectionId }]"
-                  :style="getEffectiveConnectionColor(conn) ? { color: getEffectiveConnectionColor(conn)! } : {}"
-                ></i>
-                <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm" :title="conn.name || conn.host">
+                <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm font-medium" :title="conn.name || conn.host">
                   {{ conn.name || conn.host }}
                 </span>
               </li>
