@@ -92,7 +92,7 @@ const getConnectionItemStyle = (conn: ConnectionInfo, isHighlighted: boolean) =>
   const zoomStyle = {
     paddingTop: `calc(0.25rem * ${m0})`,
     paddingBottom: `calc(0.25rem * ${m0})`,
-    fontSize: `calc(2rem * ${Math.max(0.85, m0 * 0.6 + 0.4)})`,
+    fontSize: `calc(2.5rem * ${Math.max(0.85, m0 * 0.6 + 0.4)})`,
     lineHeight: '1.1',
   };
   if (!effectiveColor) return { ...zoomStyle, background: connGradient(conn), color: '#1f2937' };
@@ -107,7 +107,7 @@ const getConnectionItemStyle = (conn: ConnectionInfo, isHighlighted: boolean) =>
     '--conn-item-border': border,
     paddingTop: `calc(0.25rem * ${m})`,
     paddingBottom: `calc(0.25rem * ${m})`,
-    fontSize: `calc(2rem * ${Math.max(0.85, m * 0.6 + 0.4)})`,
+    fontSize: `calc(2.5rem * ${Math.max(0.85, m * 0.6 + 0.4)})`,
     lineHeight: '1.1',
   };
 };
@@ -1092,7 +1092,7 @@ const cancelEditingTag = () => {
                <li
                  v-for="conn in groupData.connections"
                  :key="conn.id"
-                 class="group my-0.5 py-2 px-1.5 cursor-pointer flex items-center rounded-md overflow-hidden text-foreground transition-all duration-150 min-w-0"
+                 class="group my-0.5 py-2 px-1 cursor-pointer flex items-center rounded-md overflow-hidden text-foreground transition-all duration-150 min-w-0"
                  :class="[
                    getEffectiveConnectionColor(conn) ? 'connection-item-colored' : 'hover:bg-primary/10',
                    { 'bg-primary/20 font-medium': !getEffectiveConnectionColor(conn) && conn.id === highlightedConnectionId }
@@ -1115,7 +1115,7 @@ const cancelEditingTag = () => {
               <li
                 v-for="conn in flatFilteredConnections"
                 :key="conn.id"
-                class="group my-0.5 py-2 px-1.5 cursor-pointer flex items-center rounded-md overflow-hidden text-foreground transition-all duration-150 min-w-0"
+                class="group my-0.5 py-2 px-1 cursor-pointer flex items-center rounded-md overflow-hidden text-foreground transition-all duration-150 min-w-0"
                 :class="[
                   getEffectiveConnectionColor(conn) ? 'connection-item-colored' : 'hover:bg-primary/10',
                   { 'bg-primary/20 font-medium': !getEffectiveConnectionColor(conn) && conn.id === highlightedConnectionId }
