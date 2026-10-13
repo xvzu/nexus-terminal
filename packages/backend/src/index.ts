@@ -118,12 +118,14 @@ import './notifications/notification.dispatcher.service';
 process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
     console.error('---未处理的 Promise Rejection---');
     console.error('原因:', reason);
+    process.exit(1);
   });
   
   // 捕获未捕获的同步异常
   process.on('uncaughtException', (error: Error) => {
     console.error('---未捕获的异常---');
     console.error('错误:', error);
+    process.exit(1);
   });
 
   
@@ -371,7 +373,9 @@ const startServer = () => {
     const host = process.env.HOST || '0.0.0.0';
     server.listen(Number(port), host, () => {
         console.log(`后端服务器正在监听 http://${host}:${port}`);
-        initializeWebSocket(server, sessionMiddleware as RequestHandler); // Initialize existing WebSocket
+        initializeWebSocket(server, sessionMiddleware as RequestHandler).catch(err => {
+            console.error('WebSocket 初始化失败:', err);
+        });
     });
 };
 

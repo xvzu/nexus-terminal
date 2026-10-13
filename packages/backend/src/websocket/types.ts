@@ -4,6 +4,7 @@ import { Client, ClientChannel, SFTPWrapper } from 'ssh2';
 // 扩展 WebSocket 类型以包含会话 ID
 export interface AuthenticatedWebSocket extends WebSocket {
     isAlive?: boolean;
+    authenticated?: boolean;
     userId?: number;
     username?: string;
     sessionId?: string; 

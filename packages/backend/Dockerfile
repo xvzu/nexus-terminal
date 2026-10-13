@@ -32,7 +32,7 @@ WORKDIR /app
 
 COPY packages/backend/package.json ./package.json
 COPY package-lock.json ./package-lock.json
-RUN npm install --omit=dev --prefer-offline
+RUN npm install --omit=dev
 
 COPY --from=builder /app/packages/backend/dist ./dist
 COPY --from=builder /app/packages/backend/src/locales ./dist/locales

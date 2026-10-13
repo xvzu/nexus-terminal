@@ -12,13 +12,15 @@ export function initializeUpgradeHandler(
     sessionParser: RequestHandler
 ): void {
     server.on('upgrade', (request: Request, socket, head) => {
-        // --- 添加详细日志：检查传入的请求头和 request.ip ---
-        console.log('[WebSocket Upgrade] Received upgrade request.');
-        console.log('[WebSocket Upgrade] Request Headers:', JSON.stringify(request.headers, null, 2));
-        console.log(`[WebSocket Upgrade] Initial request.ip value: ${request.ip}`); // Express 尝试解析的 IP
-        console.log(`[WebSocket Upgrade] X-Real-IP Header: ${request.headers['x-real-ip']}`);
-        console.log(`[WebSocket Upgrade] X-Forwarded-For Header: ${request.headers['x-forwarded-for']}`);
-        // --- 结束添加日志 ---
+        // 生产环境不打请求头日志（防凭证泄漏），仅开发输出
+        const isDev = process.env.NODE_ENV !== 'production';
+        if (isDev) {
+            console.log('[WebSocket Upgrade] Received upgrade request.');
+            console.log('[WebSocket Upgrade] Request Headers:', JSON.stringify(request.headers, null, 2));
+            console.log(`[WebSocket Upgrade] Initial request.ip value: ${request.ip}`);
+            console.log(`[WebSocket Upgrade] X-Real-IP Header: ${request.headers['x-real-ip']}`);
+            console.log(`[WebSocket Upgrade] X-Forwarded-For Header: ${request.headers['x-forwarded-for']}`);
+        }
 
         const parsedUrl = url.parse(request.url || '', true); // Parse URL and query string
         const pathname = parsedUrl.pathname;
@@ -32,23 +34,23 @@ export function initializeUpgradeHandler(
             // 如果 X-Forwarded-For 存在，取列表中的第一个 IP
             const ips = Array.isArray(xForwardedFor) ? xForwardedFor[0] : xForwardedFor.split(',')[0];
             ipAddress = ips?.trim();
-            console.log(`[WebSocket Upgrade] Using first IP from X-Forwarded-For: ${ipAddress}`);
+            if (isDev) console.log(`[WebSocket Upgrade] Using first IP from X-Forwarded-For: ${ipAddress}`);
         } else if (xRealIp) {
             // 否则，尝试 X-Real-IP
             ipAddress = Array.isArray(xRealIp) ? xRealIp[0] : xRealIp.trim();
-            console.log(`[WebSocket Upgrade] Using IP from X-Real-IP: ${ipAddress}`);
+            if (isDev) console.log(`[WebSocket Upgrade] Using IP from X-Real-IP: ${ipAddress}`);
         } else {
             // 最后回退到 socket.remoteAddress 或 request.ip
             ipAddress = request.socket.remoteAddress || request.ip;
-            console.log(`[WebSocket Upgrade] Using fallback IP: ${ipAddress}`);
+            if (isDev) console.log(`[WebSocket Upgrade] Using fallback IP: ${ipAddress}`);
         }
 
         // 确保 ipAddress 不是 undefined 或空字符串，否则设为 'unknown'
         ipAddress = ipAddress || 'unknown';
-        console.log(`[WebSocket Upgrade] Determined IP Address: ${ipAddress}`);
+        if (isDev) console.log(`[WebSocket Upgrade] Determined IP Address: ${ipAddress}`);
         
 
-        console.log(`WebSocket: 升级请求来自 IP: ${ipAddress}, Path: ${pathname}`); // 使用新获取的 ipAddress
+        if (isDev) console.log(`WebSocket: 升级请求来自 IP: ${ipAddress}, Path: ${pathname}`);
 
         // --- 双端实时同步长连接专用路由 (/ws/sync 或 /sync) ---
         if (pathname === '/ws/sync' || pathname === '/sync') {
@@ -110,6 +112,7 @@ export function initializeUpgradeHandler(
                 console.log(`WebSocket: Handling RDP proxy upgrade for user ${request.session.username}`);
                 wss.handleUpgrade(request, socket, head, (ws) => {
                     const extWs = ws as AuthenticatedWebSocket;
+                    extWs.authenticated = true;
                     extWs.userId = request.session.userId;
                     extWs.username = request.session.username;
                     // 传递必要信息给 connection 事件
@@ -127,6 +130,7 @@ export function initializeUpgradeHandler(
                 console.log(`WebSocket: Handling standard upgrade for user ${request.session.username}`);
                 wss.handleUpgrade(request, socket, head, (ws) => {
                     const extWs = ws as AuthenticatedWebSocket;
+                    extWs.authenticated = true;
                     extWs.userId = request.session.userId;
                     extWs.username = request.session.username;
                     (request as any).clientIpAddress = ipAddress;
