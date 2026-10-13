@@ -1073,7 +1073,7 @@ const handleConnectAllFilteredConnections = async () => {
           </div>
 
           <!-- Connection Cards -->
-          <div v-else-if="filteredAndSortedConnections.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          <div v-else-if="filteredAndSortedConnections.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
             <div
               v-for="conn in filteredAndSortedConnections"
               :key="conn.id"
