@@ -1085,7 +1085,7 @@ const cancelEditingTag = () => {
               </button>
            </div>
             <!-- Connection Items List -->
-            <ul v-show="expandedGroups[groupData.groupName]" class="list-none p-0 m-0 pl-3 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }">
+            <ul v-show="expandedGroups[groupData.groupName]" class="list-none p-0 m-0 pl-3 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))' }">
               <!-- ... li v-for="conn in groupData.connections" ... -->
                <li
                  v-for="conn in groupData.connections"
@@ -1101,7 +1101,7 @@ const cancelEditingTag = () => {
                  @click.right.prevent
                  @contextmenu.prevent="showContextMenu($event, conn)"
                >
-                 <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm font-medium" :title="conn.name || conn.host">
+                 <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm font-medium text-center" :title="conn.name || conn.host">
                    {{ conn.name || conn.host }}
                  </span>
                </li>
@@ -1109,7 +1109,7 @@ const cancelEditingTag = () => {
             </div>
           </div>
           <!-- Flat View -->
-          <ul v-else class="list-none p-0 m-0 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }">
+          <ul v-else class="list-none p-0 m-0 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))' }">
               <li
                 v-for="conn in flatFilteredConnections"
                 :key="conn.id"
@@ -1124,7 +1124,7 @@ const cancelEditingTag = () => {
                 @click.right.prevent
                 @contextmenu.prevent="showContextMenu($event, conn)"
               >
-                <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm font-medium" :title="conn.name || conn.host">
+                <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm font-medium text-center" :title="conn.name || conn.host">
                   {{ conn.name || conn.host }}
                 </span>
               </li>
