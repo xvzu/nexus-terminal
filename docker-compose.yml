@@ -33,6 +33,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
+      HOST: "::"
       NEXUS_DATA_DIR: /app/data
     volumes:
       - ./data:/app/data
