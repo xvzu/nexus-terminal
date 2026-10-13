@@ -980,7 +980,7 @@ const cancelEditingTag = () => {
       </div>
 
       <!-- Connection List Area -->
-      <div class="flex-grow overflow-y-auto p-2" ref="listAreaRef" @wheel.prevent="handleWheel">
+      <div class="flex-grow overflow-y-auto p-2" ref="listAreaRef" @wheel="handleWheel">
         <!-- No Results / No Connections State -->
         <!-- 修改 v-if 条件，考虑两种模式，并且仅在有搜索词时显示 "No Results" -->
         <div v-if="((showConnectionTagsBoolean && filteredAndGroupedConnections.length === 0) || (!showConnectionTagsBoolean && flatFilteredConnections.length === 0)) && connections.length > 0 && searchTerm" class="p-6 text-center text-text-secondary">
