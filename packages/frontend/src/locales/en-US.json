@@ -1329,6 +1329,9 @@
     }
   },
   "workspaceConnectionList": {
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "zoomReset": "Reset size",
     "untagged": "Untagged",
     "searchPlaceholder": "Search name or host...",
     "noResults": "No connections found matching \"{searchTerm}\".",
@@ -1803,6 +1806,8 @@
     "itemsToSendTitle": "Items to send:",
     "noItemsSelected": "No items selected to send.",
     "sendButton": "Send",
+    "sendingButton": "Sending...",
+    "errorSourceConnectionMissing": "Source server info is missing, cannot start transfer.",
     "cancelButton": "Cancel",
     "errorFetchingData": "Error fetching data for modal.",
     "errorFetchingConnections": "Error fetching connections.",

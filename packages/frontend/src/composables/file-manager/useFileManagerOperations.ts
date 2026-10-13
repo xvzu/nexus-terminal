@@ -218,46 +218,60 @@ export function useFileManagerOperations(options: FileManagerOperationsOptions) 
     }
   };
 
-  const triggerDownload = (items: FileListItem[], dbConnectionId?: string) => {
+  const isDownloading = ref(false);
+
+  const triggerDownload = async (items: FileListItem[], dbConnectionId?: string) => {
     if (!isConnected.value || !currentSftpManager.value) return;
     const connId = dbConnectionId;
     if (!connId) {
       console.error(`[FileManager ${sessionId}-${instanceId}] Cannot download: Missing connection ID.`);
       return;
     }
-
-    items.forEach(item => {
-      if (!item.attrs.isFile) return;
-
-      const downloadPath = currentSftpManager.value!.joinPath(currentSftpManager.value!.currentPath.value, item.filename);
-      const downloadUrl = `/api/v1/sftp/download?connectionId=${connId}&remotePath=${encodeURIComponent(downloadPath)}`;
-
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      const safeFilename = item.filename.replace(/"/g, '');
-      link.setAttribute('download', safeFilename);
-      document.body.appendChild(link);
-      link.click();
-
-      setTimeout(() => {
+    if (isDownloading.value) return;
+    isDownloading.value = true;
+    try {
+      for (const item of items) {
+        if (!item.attrs.isFile) continue;
+        const downloadPath = currentSftpManager.value!.joinPath(currentSftpManager.value!.currentPath.value, item.filename);
+        const downloadUrl = `/api/v1/sftp/download?connectionId=${connId}&remotePath=${encodeURIComponent(downloadPath)}`;
+        const response = await fetch(downloadUrl);
+        if (!response.ok) {
+          let errMsg = `HTTP ${response.status}`;
+          try { const d = await response.json(); errMsg = d.message || errMsg; } catch {}
+          notifyError?.(`下载 ${item.filename} 失败: ${errMsg}`);
+          continue;
+        }
+        const blob = await response.blob();
+        const safeFilename = item.filename.replace(/"/g, '');
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.setAttribute('download', safeFilename);
+        document.body.appendChild(link);
+        link.click();
         document.body.removeChild(link);
-      }, 100);
-    });
+        URL.revokeObjectURL(link.href);
+      }
+    } finally {
+      isDownloading.value = false;
+    }
   };
 
-  const triggerDownloadDirectory = (item: FileListItem, dbConnectionId?: string) => {
+  const triggerDownloadDirectory = async (item: FileListItem, dbConnectionId?: string) => {
     if (!isConnected.value || !currentSftpManager.value || !item.attrs.isDirectory) return;
     const connId = dbConnectionId;
     if (!connId) {
       console.error(`[FileManager ${sessionId}-${instanceId}] Cannot download directory: Missing connection ID.`);
       return;
     }
+    if (isDownloading.value) return;
 
     const directoryPath = currentSftpManager.value.joinPath(currentSftpManager.value.currentPath.value, item.filename);
     const downloadUrl = `/api/v1/sftp/download-directory?connectionId=${connId}&remotePath=${encodeURIComponent(directoryPath)}`;
 
-    fetch(downloadUrl)
-      .then(async response => {
+    isDownloading.value = true;
+    try {
+      const response = await fetch(downloadUrl);
+      {
         if (response.ok) {
           const blob = await response.blob();
           const contentDisposition = response.headers.get('content-disposition');
@@ -278,12 +292,18 @@ export function useFileManagerOperations(options: FileManagerOperationsOptions) 
           document.body.removeChild(link);
           URL.revokeObjectURL(link.href);
         } else {
+          let errMsg = `HTTP ${response.status}`;
+          try { const d = await response.json(); errMsg = d.message || errMsg; } catch { try { const t = await response.text(); if (t) errMsg = t; } catch {} }
+          notifyError?.(`下载目录 ${item.filename} 失败: ${errMsg}`);
           console.error(`[FileManager ${sessionId}-${instanceId}] Directory download failed: ${response.status}`);
         }
-      })
-      .catch(error => {
-        console.error(`[FileManager ${sessionId}-${instanceId}] Network error during directory download:`, error);
-      });
+      }
+    } catch (error) {
+      notifyError?.(`下载目录 ${item.filename} 失败: ${error}`);
+      console.error(`[FileManager ${sessionId}-${instanceId}] Network error during directory download:`, error);
+    } finally {
+      isDownloading.value = false;
+    }
   };
 
   return {

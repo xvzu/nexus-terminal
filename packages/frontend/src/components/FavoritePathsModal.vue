@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { useFavoritePathsStore, type FavoritePathItem } from '../stores/favoritePaths.store';
 import AddEditFavoritePathForm from './AddEditFavoritePathForm.vue';
 import { useConfirmDialog } from '../composables/useConfirmDialog';
+import { useUiNotificationsStore } from '../stores/uiNotifications.store';
 import MobileFavoritePathsModal from './MobileFavoritePathsModal.vue';
 
 const PADDING = 8; // px
@@ -32,6 +33,7 @@ const emit = defineEmits(['close', 'navigateToPath']);
 const { t } = useI18n();
 const favoritePathsStore = useFavoritePathsStore();
 const { showConfirmDialog } = useConfirmDialog();
+const uiNotificationsStore = useUiNotificationsStore();
 
 const searchTerm = ref('');
 const showAddEditModal = ref(false);
@@ -137,6 +139,58 @@ const openAddModal = () => {
   showAddEditModal.value = true;
 };
 
+// 收藏夹右键菜单（条目 + 空白区）
+const favoriteCtxMenuVisible = ref(false);
+const favoriteCtxMenuPosition = ref({ x: 0, y: 0 });
+const favoriteCtxTarget = ref<FavoritePathItem | null>(null);
+const favoriteCtxFromBlank = ref(false);
+
+const showFavoriteContextMenu = (event: MouseEvent, pathItem: FavoritePathItem) => {
+  event.preventDefault();
+  event.stopPropagation();
+  favoriteCtxTarget.value = pathItem;
+  favoriteCtxFromBlank.value = false;
+  favoriteCtxMenuPosition.value = { x: event.clientX, y: event.clientY };
+  favoriteCtxMenuVisible.value = true;
+  document.addEventListener('click', closeFavoriteContextMenu, { once: true });
+  nextTick(() => {
+    positionCtxMenu();
+  });
+};
+
+const showBlankContextMenu = (event: MouseEvent) => {
+  event.preventDefault();
+  favoriteCtxTarget.value = null;
+  favoriteCtxFromBlank.value = true;
+  favoriteCtxMenuPosition.value = { x: event.clientX, y: event.clientY };
+  favoriteCtxMenuVisible.value = true;
+  document.addEventListener('click', closeFavoriteContextMenu, { once: true });
+  nextTick(() => {
+    positionCtxMenu();
+  });
+};
+
+const positionCtxMenu = () => {
+  const el = document.querySelector('.fav-ctx-menu') as HTMLElement;
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  let x = favoriteCtxMenuPosition.value.x;
+  let y = favoriteCtxMenuPosition.value.y;
+  if (x + r.width > window.innerWidth) x = window.innerWidth - r.width - 5;
+  if (y + r.height > window.innerHeight) y = window.innerHeight - r.height - 5;
+  x = Math.max(5, x);
+  y = Math.max(5, y);
+  if (x !== favoriteCtxMenuPosition.value.x || y !== favoriteCtxMenuPosition.value.y) {
+    favoriteCtxMenuPosition.value = { x, y };
+  }
+};
+
+const closeFavoriteContextMenu = () => {
+  favoriteCtxMenuVisible.value = false;
+  favoriteCtxTarget.value = null;
+  document.removeEventListener('click', closeFavoriteContextMenu);
+};
+
 const openEditModal = (pathItem: FavoritePathItem) => {
   editingPathItem.value = { ...pathItem };
   showAddEditModal.value = true;
@@ -151,6 +205,7 @@ const handleDelete = async (pathItem: FavoritePathItem) => {
       await favoritePathsStore.deleteFavoritePath(pathItem.id, t);
     } catch (error) {
       console.error('Failed to delete favorite path from modal:', error);
+      uiNotificationsStore.showError(t('favoritePaths.notifications.deleteError', '删除收藏路径失败'));
     }
   }
 };
@@ -304,7 +359,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Path List -->
-      <div ref="listContainerRef" class="overflow-y-auto flex-grow p-1 text-sm select-none">
+      <div ref="listContainerRef" class="overflow-y-auto flex-grow p-1 text-sm select-none" @contextmenu.prevent="showBlankContextMenu">
         <div v-if="favoritePathsStore.isLoading && filteredPaths.length === 0" class="p-3 text-center text-text-secondary">
           {{ t('favoritePaths.loading', 'Loading favorite paths...') }}
         </div>
@@ -324,6 +379,7 @@ onBeforeUnmount(() => {
           ]"
           @click="handleItemClick(favPath)"
           @mouseenter="selectedIndex = idx"
+          @contextmenu.prevent.stop="showFavoriteContextMenu($event, favPath)"
         >
           <div class="truncate flex-grow mr-2">
             <span v-if="favPath.name" class="font-medium block truncate text-foreground">{{ favPath.name }}</span>
@@ -347,6 +403,41 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- 右键菜单 -->
+    <div
+      v-if="favoriteCtxMenuVisible"
+      class="fixed bg-background border border-border/50 shadow-xl rounded-lg py-1.5 z-[60] min-w-[160px] fav-ctx-menu"
+      :style="{ top: `${favoriteCtxMenuPosition.y}px`, left: `${favoriteCtxMenuPosition.x}px` }"
+      @click.stop
+    >
+      <ul class="list-none p-0 m-0">
+        <li
+          class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1"
+          @click="openAddModal(); closeFavoriteContextMenu()"
+        >
+          <i class="fas fa-plus mr-2 w-4 text-center"></i>
+          <span>{{ t('favoritePaths.addNew', '添加收藏') }}</span>
+        </li>
+        <li v-if="favoriteCtxTarget" class="border-t border-border/50 my-1"></li>
+        <li
+          v-if="favoriteCtxTarget"
+          class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1"
+          @click="openEditModal(favoriteCtxTarget); closeFavoriteContextMenu()"
+        >
+          <i class="fas fa-pencil-alt mr-2 w-4 text-center"></i>
+          <span>编辑收藏</span>
+        </li>
+        <li
+          v-if="favoriteCtxTarget"
+          class="group px-4 py-1.5 cursor-pointer flex items-center text-error hover:bg-error/10 text-sm transition-colors duration-150 rounded-md mx-1"
+          @click="handleDelete(favoriteCtxTarget)"
+        >
+          <i class="fas fa-trash-alt mr-2 w-4 text-center"></i>
+          <span>删除收藏</span>
+        </li>
+      </ul>
     </div>
 
     <!-- Add/Edit Modal (Desktop) -->

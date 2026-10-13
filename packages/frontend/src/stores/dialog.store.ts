@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 interface DialogState {
@@ -67,14 +67,13 @@ export const useDialogStore = defineStore('dialog', () => {
   };
 
   return {
-    visible: ref(state.value.visible), // Expose refs for reactivity in component
-    title: ref(state.value.title),
-    message: ref(state.value.message),
-    confirmText: ref(state.value.confirmText),
-    cancelText: ref(state.value.cancelText),
-    isLoading: ref(state.value.isLoading),
-    // ---
-    state, // Expose whole state for ConfirmDialog.vue to bind
+    visible: computed(() => state.value.visible),
+    title: computed(() => state.value.title),
+    message: computed(() => state.value.message),
+    confirmText: computed(() => state.value.confirmText),
+    cancelText: computed(() => state.value.cancelText),
+    isLoading: computed(() => state.value.isLoading),
+    state,
     showDialog,
     handleConfirm,
     handleCancel,

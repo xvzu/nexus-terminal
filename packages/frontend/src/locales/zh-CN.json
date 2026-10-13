@@ -1333,6 +1333,9 @@
     }
   },
   "workspaceConnectionList": {
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "zoomReset": "恢复默认大小",
     "untagged": "未标记",
     "searchPlaceholder": "搜索名称或主机...",
     "noResults": "未找到匹配 \"{searchTerm}\" 的连接。",
@@ -1776,11 +1779,13 @@
     "itemsToSendTitle": "待发送项目:",
     "noItemsSelected": "未选择待发送的项目。",
     "sendButton": "发送",
+    "sendingButton": "发送中...",
     "cancelButton": "取消",
     "errorFetchingData": "获取模态框数据时出错。",
     "errorFetchingConnections": "获取连接数据时出错。",
     "errorFetchingTags": "获取标签数据时出错。",
     "validationError": "请至少选择一个连接并指定目标路径。",
+    "errorSourceConnectionMissing": "源服务器信息缺失，无法发起传输。",
     "transferInitiated": "传输任务已创建",
     "transferInitiatedGeneric": "传输任务创建成功。",
     "transferFailedError": "发起传输失败。请重试。"

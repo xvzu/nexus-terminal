@@ -1,7 +1,8 @@
 import { ref, computed, readonly, watch, nextTick } from 'vue'; 
 import { defineStore } from 'pinia';
 import { useI18n } from 'vue-i18n';
-import { useSessionStore } from './session.store'; 
+import { useSessionStore } from './session.store';
+import { useUiNotificationsStore } from './uiNotifications.store'; 
 import type { SaveStatus, SftpReadFileSuccessPayload } from '../types/sftp.types'; 
 import * as iconv from '@vscode/iconv-lite-umd'; 
 import { Buffer } from 'buffer/'; 
@@ -419,6 +420,8 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
             tab.isSaving = false;
             tab.saveStatus = 'error';
             tab.saveError = `${t('fileManager.errors.saveFailed')}: ${err.message || err}`;
+            const uiNotificationsStore = useUiNotificationsStore();
+            uiNotificationsStore.showError(tab.saveError);
 
             setTimeout(() => {
                 if (tab.saveStatus === 'error') {

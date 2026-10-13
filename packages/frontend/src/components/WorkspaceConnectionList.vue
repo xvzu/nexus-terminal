@@ -35,17 +35,57 @@ const getEffectiveConnectionColor = (conn: ConnectionInfo): string | null => {
   return resolveEffectiveColor(conn.background_color, folderColor);
 };
 
+// 列表缩放（Ctrl+滚轮/右键菜单），持久化到本地
+const CL_ZOOM_KEY = 'nexus_connectionListRowSizeMultiplier';
+const loadConnectionListZoom = (): number => {
+  try {
+    const v = localStorage.getItem(CL_ZOOM_KEY);
+    if (v) {
+      const n = parseFloat(v);
+      if (!isNaN(n) && n >= 0.5 && n <= 2.5) return n;
+    }
+  } catch {}
+  return 1.0;
+};
+const rowSizeMultiplier = ref(loadConnectionListZoom());
+const saveConnectionListZoom = (val: number) => {
+  try { localStorage.setItem(CL_ZOOM_KEY, String(val)); } catch {}
+};
+const setZoom = (value: number) => {
+  const clamped = Math.max(0.5, Math.min(2.5, value));
+  const rounded = parseFloat(clamped.toFixed(2));
+  rowSizeMultiplier.value = rounded;
+  saveConnectionListZoom(rounded);
+};
+const handleWheel = (event: WheelEvent) => {
+  if (!event.ctrlKey && !event.metaKey) return;
+  event.preventDefault();
+  const delta = event.deltaY > 0 ? -0.15 : 0.15;
+  setZoom(rowSizeMultiplier.value + delta);
+};
+
 // 计算带背景颜色的连接项样式
 const getConnectionItemStyle = (conn: ConnectionInfo, isHighlighted: boolean) => {
   const effectiveColor = getEffectiveConnectionColor(conn);
-  if (!effectiveColor) return {};
+  const m0 = rowSizeMultiplier.value;
+  const zoomStyle = {
+    paddingTop: `calc(0.5rem * ${m0})`,
+    paddingBottom: `calc(0.5rem * ${m0})`,
+    fontSize: `calc(0.875rem * ${Math.max(0.85, m0 * 0.6 + 0.4)})`,
+  };
+  if (!effectiveColor) return zoomStyle;
   const bg = hexToRgba(effectiveColor, isHighlighted ? 0.28 : 0.12);
   const hoverBg = hexToRgba(effectiveColor, 0.22);
   const border = hexToRgba(effectiveColor, 0.25);
+  const m = rowSizeMultiplier.value;
   return {
+    ...zoomStyle,
     '--conn-item-bg': bg,
     '--conn-item-hover-bg': hoverBg,
     '--conn-item-border': border,
+    paddingTop: `calc(0.5rem * ${m})`,
+    paddingBottom: `calc(0.5rem * ${m})`,
+    fontSize: `calc(0.875rem * ${Math.max(0.85, m * 0.6 + 0.4)})`,
   };
 };
 
@@ -492,9 +532,22 @@ const closeContextMenu = () => {
 };
 
 // 处理右键菜单操作
-const handleMenuAction = async (action: 'add' | 'edit' | 'delete' | 'clone') => { // 添加 'clone' 类型
+const handleMenuAction = async (action: 'add' | 'edit' | 'delete' | 'clone' | 'zoomIn' | 'zoomOut' | 'zoomReset') => { // 添加 'clone' 类型
   const conn = contextTargetConnection.value;
   closeContextMenu(); // 先关闭菜单
+
+  if (action === 'zoomIn') {
+    setZoom(rowSizeMultiplier.value + 0.15);
+    return;
+  }
+  if (action === 'zoomOut') {
+    setZoom(rowSizeMultiplier.value - 0.15);
+    return;
+  }
+  if (action === 'zoomReset') {
+    setZoom(1.0);
+    return;
+  }
 
   if (action === 'add') {
     console.log('[WorkspaceConnectionList] handleMenuAction called with action: add. Emitting request-add-connection...'); 
@@ -927,7 +980,7 @@ const cancelEditingTag = () => {
       </div>
 
       <!-- Connection List Area -->
-      <div class="flex-grow overflow-y-auto p-2" ref="listAreaRef">
+      <div class="flex-grow overflow-y-auto p-2" ref="listAreaRef" @wheel.prevent="handleWheel">
         <!-- No Results / No Connections State -->
         <!-- 修改 v-if 条件，考虑两种模式，并且仅在有搜索词时显示 "No Results" -->
         <div v-if="((showConnectionTagsBoolean && filteredAndGroupedConnections.length === 0) || (!showConnectionTagsBoolean && flatFilteredConnections.length === 0)) && connections.length > 0 && searchTerm" class="p-6 text-center text-text-secondary">
@@ -1076,6 +1129,19 @@ const cancelEditingTag = () => {
         @click.stop
       >
         <ul class="list-none p-0 m-0">
+          <li class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1" @click="handleMenuAction('zoomIn')">
+              <i class="fas fa-search-plus mr-3 w-4 text-center text-text-secondary group-hover:text-primary"></i>
+              <span>{{ t('workspaceConnectionList.zoomIn', '放大') }}</span>
+          </li>
+          <li class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1" @click="handleMenuAction('zoomOut')">
+              <i class="fas fa-search-minus mr-3 w-4 text-center text-text-secondary group-hover:text-primary"></i>
+              <span>{{ t('workspaceConnectionList.zoomOut', '缩小') }}</span>
+          </li>
+          <li class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1" @click="handleMenuAction('zoomReset')">
+              <i class="fas fa-compress mr-3 w-4 text-center text-text-secondary group-hover:text-primary"></i>
+              <span>{{ t('workspaceConnectionList.zoomReset', '恢复默认大小') }}</span>
+          </li>
+          <li class="border-t border-border/50 my-1"></li>
           <li class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1" @click="handleMenuAction('add')">
               <i class="fas fa-plus mr-3 w-4 text-center text-text-secondary group-hover:text-primary"></i>
               <span>{{ t('connections.addConnection') }}</span>
