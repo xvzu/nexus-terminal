@@ -90,9 +90,10 @@ const getConnectionItemStyle = (conn: ConnectionInfo, isHighlighted: boolean) =>
   const effectiveColor = getEffectiveConnectionColor(conn);
   const m0 = rowSizeMultiplier.value;
   const zoomStyle = {
-    paddingTop: `calc(0.5rem * ${m0})`,
-    paddingBottom: `calc(0.5rem * ${m0})`,
-    fontSize: `calc(0.875rem * ${Math.max(0.85, m0 * 0.6 + 0.4)})`,
+    paddingTop: `calc(0.25rem * ${m0})`,
+    paddingBottom: `calc(0.25rem * ${m0})`,
+    fontSize: `calc(2rem * ${Math.max(0.85, m0 * 0.6 + 0.4)})`,
+    lineHeight: '1.1',
   };
   if (!effectiveColor) return { ...zoomStyle, background: connGradient(conn), color: '#1f2937' };
   const bg = hexToRgba(effectiveColor, isHighlighted ? 0.28 : 0.12);
@@ -104,9 +105,10 @@ const getConnectionItemStyle = (conn: ConnectionInfo, isHighlighted: boolean) =>
     '--conn-item-bg': bg,
     '--conn-item-hover-bg': hoverBg,
     '--conn-item-border': border,
-    paddingTop: `calc(0.5rem * ${m})`,
-    paddingBottom: `calc(0.5rem * ${m})`,
-    fontSize: `calc(0.875rem * ${Math.max(0.85, m * 0.6 + 0.4)})`,
+    paddingTop: `calc(0.25rem * ${m})`,
+    paddingBottom: `calc(0.25rem * ${m})`,
+    fontSize: `calc(2rem * ${Math.max(0.85, m * 0.6 + 0.4)})`,
+    lineHeight: '1.1',
   };
 };
 
@@ -1101,7 +1103,7 @@ const cancelEditingTag = () => {
                  @click.right.prevent
                  @contextmenu.prevent="showContextMenu($event, conn)"
                >
-                 <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm font-medium text-center" :title="conn.name || conn.host">
+                 <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm font-bold text-center" :title="conn.name || conn.host">
                    {{ conn.name || conn.host }}
                  </span>
                </li>
@@ -1124,7 +1126,7 @@ const cancelEditingTag = () => {
                 @click.right.prevent
                 @contextmenu.prevent="showContextMenu($event, conn)"
               >
-                <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm font-medium text-center" :title="conn.name || conn.host">
+                <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm font-bold text-center" :title="conn.name || conn.host">
                   {{ conn.name || conn.host }}
                 </span>
               </li>
