@@ -497,8 +497,8 @@ const handleConnect = (connectionId: number, event?: MouseEvent | KeyboardEvent)
 // };
 
 // 显示右键菜单
-const showContextMenu = (event: MouseEvent, connection: ConnectionInfo) => {
-console.log(`[WkspConnList] showContextMenu (右键) called for ID: ${connection.id}. Event:`, event);
+const showContextMenu = (event: MouseEvent, connection: ConnectionInfo | null) => {
+console.log(`[WkspConnList] showContextMenu (右键) called for ID: ${connection?.id}. Event:`, event);
 event.preventDefault(); // 再次确保阻止默认行为
 event.stopPropagation(); // 阻止事件冒泡
 event.stopImmediatePropagation(); // 尝试更强力地阻止事件链
@@ -983,26 +983,6 @@ const cancelEditingTag = () => {
 
     <!-- Main Content Area -->
     <div v-else class="flex flex-col h-full">
-      <!-- Search and Add Bar -->
-      <div class="flex p-2 border-b border-border/50"> <!-- Reduced padding p-3 to p-2 -->
-        <input
-          type="text"
-          v-model="searchTerm"
-          :placeholder="t('workspaceConnectionList.searchPlaceholder')"
-          ref="searchInputRef"
-          class="flex-grow min-w-0 px-4 py-1.5 border border-border/50 rounded-lg bg-input text-foreground text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition duration-150 ease-in-out"
-          data-focus-id="connectionListSearch"
-          @keydown="handleKeyDown"
-          @blur="handleBlur"
-        />
-        <button
-          class="ml-2 w-8 h-8 bg-primary text-white border-none rounded-lg text-sm font-semibold cursor-pointer shadow-md transition-colors duration-200 ease-in-out hover:bg-button-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:bg-gray-400 disabled:cursor-not-allowed disabled:opacity-70 flex-shrink-0 flex items-center justify-center"
-          @click="handleMenuAction('add')"
-          :title="t('connections.addConnection')"
-        >
-          <i class="fas fa-plus text-white"></i>
-        </button>
-      </div>
 
       <!-- Connection List Area -->
       <div class="flex-grow overflow-y-auto p-2" ref="listAreaRef" @wheel="handleWheel">
@@ -1089,7 +1069,7 @@ const cancelEditingTag = () => {
               </button>
            </div>
             <!-- Connection Items List -->
-            <ul v-show="expandedGroups[groupData.groupName]" class="list-none p-0 m-0 pl-3 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(56px, 1fr))' }">
+            <ul v-show="expandedGroups[groupData.groupName]" @contextmenu.prevent="showContextMenu($event, null)" class="list-none p-0 m-0 pl-3 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(56px, 1fr))' }">
               <!-- ... li v-for="conn in groupData.connections" ... -->
                <li
                  v-for="conn in groupData.connections"
@@ -1113,7 +1093,7 @@ const cancelEditingTag = () => {
             </div>
           </div>
           <!-- Flat View -->
-          <ul v-else class="list-none p-0 m-0 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(56px, 1fr))' }">
+          <ul v-else @contextmenu.prevent="showContextMenu($event, null)" class="list-none p-0 m-0 grid gap-1.5" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(56px, 1fr))' }">
               <li
                 v-for="conn in flatFilteredConnections"
                 :key="conn.id"
