@@ -355,7 +355,7 @@ onBeforeUnmount(() => {
     >
 
       <!-- Path List -->
-      <div ref="listContainerRef" class="overflow-y-auto flex-grow p-1 text-sm select-none grid gap-1.5 content-start" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))' }" @contextmenu.prevent="showBlankContextMenu">
+      <div ref="listContainerRef" class="overflow-y-auto flex-grow p-1 text-sm select-none flex flex-wrap gap-1.5 content-start items-start" @contextmenu.prevent="showBlankContextMenu">
         <div v-if="favoritePathsStore.isLoading && filteredPaths.length === 0" class="p-3 text-center text-text-secondary">
           {{ t('favoritePaths.loading', 'Loading favorite paths...') }}
         </div>
