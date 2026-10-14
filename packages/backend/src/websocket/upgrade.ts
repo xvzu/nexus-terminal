@@ -3,6 +3,8 @@ import url from 'url';
 import { Request, RequestHandler } from 'express';
 import { WebSocketServer } from 'ws';
 import { AuthenticatedWebSocket } from './types';
+import { handleSyncWsConnection, handleFrontendEventsConnection } from '../sync/sync.ws-broadcaster';
+import { getServerSyncApiKey } from '../sync/sync.middleware';
 
 export function initializeUpgradeHandler(
     server: http.Server,
@@ -10,8 +12,8 @@ export function initializeUpgradeHandler(
     sessionParser: RequestHandler
 ): void {
     server.on('upgrade', (request: Request, socket, head) => {
+        // 生产环境不打请求头日志（防凭证泄漏），仅开发输出
         const isDev = process.env.NODE_ENV !== 'production';
-
         if (isDev) {
             console.log('[WebSocket Upgrade] Received upgrade request.');
             console.log('[WebSocket Upgrade] Request Headers:', JSON.stringify(request.headers, null, 2));
@@ -20,70 +22,123 @@ export function initializeUpgradeHandler(
             console.log(`[WebSocket Upgrade] X-Forwarded-For Header: ${request.headers['x-forwarded-for']}`);
         }
 
-        const parsedUrl = url.parse(request.url || '', true);
+        const parsedUrl = url.parse(request.url || '', true); // Parse URL and query string
         const pathname = parsedUrl.pathname;
 
+        // --- 修改：尝试从头部获取 IP，并处理 X-Forwarded-For 列表 ---
         let ipAddress: string | undefined;
         const xForwardedFor = request.headers['x-forwarded-for'];
         const xRealIp = request.headers['x-real-ip'];
 
         if (xForwardedFor) {
+            // 如果 X-Forwarded-For 存在，取列表中的第一个 IP
             const ips = Array.isArray(xForwardedFor) ? xForwardedFor[0] : xForwardedFor.split(',')[0];
             ipAddress = ips?.trim();
             if (isDev) console.log(`[WebSocket Upgrade] Using first IP from X-Forwarded-For: ${ipAddress}`);
         } else if (xRealIp) {
+            // 否则，尝试 X-Real-IP
             ipAddress = Array.isArray(xRealIp) ? xRealIp[0] : xRealIp.trim();
             if (isDev) console.log(`[WebSocket Upgrade] Using IP from X-Real-IP: ${ipAddress}`);
         } else {
+            // 最后回退到 socket.remoteAddress 或 request.ip
             ipAddress = request.socket.remoteAddress || request.ip;
             if (isDev) console.log(`[WebSocket Upgrade] Using fallback IP: ${ipAddress}`);
         }
 
+        // 确保 ipAddress 不是 undefined 或空字符串，否则设为 'unknown'
         ipAddress = ipAddress || 'unknown';
         if (isDev) console.log(`[WebSocket Upgrade] Determined IP Address: ${ipAddress}`);
         
-        console.log(`WebSocket: 升级请求来自 IP: ${ipAddress}, Path: ${pathname}`);
 
-        try {
-            sessionParser(request, {} as any, () => {
-                if (!request.session || !request.session.userId) {
-                    console.log(`WebSocket 认证失败 (Path: ${pathname})：未找到会话或用户未登录。`);
+        if (isDev) console.log(`WebSocket: 升级请求来自 IP: ${ipAddress}, Path: ${pathname}`);
+
+        // --- 双端实时同步长连接专用路由 (/ws/sync 或 /sync) ---
+        if (pathname === '/ws/sync' || pathname === '/sync') {
+            const rawApiKey = (parsedUrl.query.apiKey as string) || (request.headers['x-sync-api-key'] as string);
+            getServerSyncApiKey().then(serverApiKey => {
+                if (!serverApiKey || !rawApiKey || rawApiKey !== serverApiKey) {
+                    console.warn(`[Sync WS] 鉴权失败，拒绝来自 ${ipAddress} 的同步长连接。`);
                     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
                     socket.destroy();
                     return;
                 }
-                console.log(`WebSocket 认证成功 (Path: ${pathname})：用户 ${request.session.username} (ID: ${request.session.userId})`);
-
-                if (pathname === '/rdp-proxy' || pathname === '/ws/rdp-proxy') {
-                    wss.handleUpgrade(request, socket, head, (ws) => {
-                        const extWs = ws as AuthenticatedWebSocket;
-                        extWs.authenticated = true;
-                        extWs.userId = request.session.userId;
-                        extWs.username = request.session.username;
-                        (request as any).clientIpAddress = ipAddress;
-                        (request as any).isRdpProxy = true;
-                        (request as any).rdpToken = parsedUrl.query.token;
-                        (request as any).rdpWidth = parsedUrl.query.width;
-                        (request as any).rdpHeight = parsedUrl.query.height;
-                        (request as any).rdpDpi = parsedUrl.query.dpi;
-                        wss.emit('connection', extWs, request);
-                    });
-                } else {
-                    wss.handleUpgrade(request, socket, head, (ws) => {
-                        const extWs = ws as AuthenticatedWebSocket;
-                        extWs.authenticated = true;
-                        extWs.userId = request.session.userId;
-                        extWs.username = request.session.username;
-                        (request as any).clientIpAddress = ipAddress;
-                        (request as any).isRdpProxy = false;
-                        wss.emit('connection', extWs, request);
-                    });
-                }
+                console.log(`[Sync WS] 鉴权成功，升级建立双端同步实时广播通道 (来自 IP: ${ipAddress})。`);
+                wss.handleUpgrade(request, socket, head, (ws) => {
+                    handleSyncWsConnection(ws, request);
+                });
+            }).catch(err => {
+                console.error('[Sync WS] 鉴权流程异常:', err);
+                socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
+                socket.destroy();
             });
-        } catch (err) {
-            console.error(`WebSocket upgrade error for ${pathname}:`, err);
-            socket.destroy();
+            return;
         }
+
+        // --- 前端 UI 全局实时事件长连接专用路由 (/ws/events 或 /events) ---
+        if (pathname === '/ws/events' || pathname === '/events') {
+            // @ts-ignore Express-session 类型问题
+            sessionParser(request, {} as any, () => {
+                const isLocal = ipAddress === '127.0.0.1' || ipAddress === '::1' || ipAddress === 'localhost' || ipAddress === '::ffff:127.0.0.1';
+                const isAuthed = !!(request.session && request.session.userId);
+                if (!isAuthed && !isLocal) {
+                    console.warn(`[FrontendEvents] 拒绝未登录且非本地的前端事件连接 (来自 IP: ${ipAddress})。`);
+                    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+                    socket.destroy();
+                    return;
+                }
+                console.log(`[FrontendEvents] 鉴权通过，建立前端 UI 全局事件订阅通道 (来自 IP: ${ipAddress})。`);
+                wss.handleUpgrade(request, socket, head, (ws) => {
+                    handleFrontendEventsConnection(ws, request);
+                });
+            });
+            return;
+        }
+
+        // @ts-ignore Express-session 类型问题
+        sessionParser(request, {} as any, () => {
+            // --- 认证检查 ---
+            if (!request.session || !request.session.userId) {
+                console.log(`WebSocket 认证失败 (Path: ${pathname})：未找到会话或用户未登录。`);
+                socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+                socket.destroy();
+                return;
+            }
+            console.log(`WebSocket 认证成功 (Path: ${pathname})：用户 ${request.session.username} (ID: ${request.session.userId})`);
+
+            // --- 根据路径处理升级 ---
+            // 本地调试用/rdp-proxy，nginx反代用/ws/rdp-proxy
+            if (pathname === '/rdp-proxy' || pathname === '/ws/rdp-proxy') {
+                // RDP 代理路径 - 直接处理升级，连接逻辑在 'connection' 事件中处理
+                console.log(`WebSocket: Handling RDP proxy upgrade for user ${request.session.username}`);
+                wss.handleUpgrade(request, socket, head, (ws) => {
+                    const extWs = ws as AuthenticatedWebSocket;
+                    extWs.authenticated = true;
+                    extWs.userId = request.session.userId;
+                    extWs.username = request.session.username;
+                    // 传递必要信息给 connection 事件
+                    (request as any).clientIpAddress = ipAddress;
+                    (request as any).isRdpProxy = true; // 标记为 RDP 代理连接
+                    // 传递 RDP token 和其他参数
+                    (request as any).rdpToken = parsedUrl.query.token;
+                    (request as any).rdpWidth = parsedUrl.query.width;
+                    (request as any).rdpHeight = parsedUrl.query.height;
+                    (request as any).rdpDpi = parsedUrl.query.dpi;
+                    wss.emit('connection', extWs, request);
+                });
+            } else {
+                // 默认路径 (SSH, SFTP, Docker etc.) - 按原逻辑处理
+                console.log(`WebSocket: Handling standard upgrade for user ${request.session.username}`);
+                wss.handleUpgrade(request, socket, head, (ws) => {
+                    const extWs = ws as AuthenticatedWebSocket;
+                    extWs.authenticated = true;
+                    extWs.userId = request.session.userId;
+                    extWs.username = request.session.username;
+                    (request as any).clientIpAddress = ipAddress;
+                    (request as any).isRdpProxy = false; // 标记为非 RDP 代理连接
+                    wss.emit('connection', extWs, request);
+                });
+            }
+        });
     });
     console.log('WebSocket upgrade handler initialized.');
 }

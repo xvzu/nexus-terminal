@@ -180,8 +180,6 @@ You can right-click in the SSH tab to select "Suspend Session" (long-press on mo
 1. **On mobile devices, you can zoom in or out on the terminal font using a two-finger gesture.**
 2. To enable Passkey login, set the `RP_ID` and `RP_ORIGIN` environment variables in the `.env` file.
 
-
-
 ## ⚠️ Notes
 
 1.  **Dual File Managers**: You can add two file manager components in the layout (experimental feature, may be unstable).

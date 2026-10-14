@@ -28,6 +28,8 @@ let terminalTextStrokeEnabledFound = false;
     let terminalTextShadowOffsetYFound = false;
     let terminalTextShadowBlurFound = false;
     let terminalTextShadowColorFound = false;
+    let terminalHighlightEnabledFound = false;
+    let terminalHighlightRulesFound = false;
  
     for (const row of rows) {
         // 更新 latestUpdatedAt
@@ -45,6 +47,9 @@ let terminalTextStrokeEnabledFound = false;
                 break;
             case 'terminalFontFamily':
                 settings.terminalFontFamily = row.value;
+                break;
+            case 'terminalFontFamilyMobile':
+                settings.terminalFontFamilyMobile = row.value;
                 break;
             case 'terminalFontSize':
                 settings.terminalFontSize = parseInt(row.value, 10);
@@ -113,6 +118,14 @@ case 'terminalTextStrokeEnabled':
                 settings.terminalTextShadowColor = row.value;
                 terminalTextShadowColorFound = true;
                 break;
+            case 'terminalHighlightEnabled':
+                settings.terminalHighlightEnabled = row.value === 'true';
+                terminalHighlightEnabledFound = true;
+                break;
+            case 'terminalHighlightRules':
+                settings.terminalHighlightRules = row.value;
+                terminalHighlightRulesFound = true;
+                break;
         }
     }
  
@@ -122,6 +135,7 @@ case 'terminalTextStrokeEnabled':
         customUiTheme: settings.customUiTheme ?? defaults.customUiTheme,
         activeTerminalThemeId: settings.activeTerminalThemeId ?? defaults.activeTerminalThemeId,
         terminalFontFamily: settings.terminalFontFamily ?? defaults.terminalFontFamily,
+        terminalFontFamilyMobile: settings.terminalFontFamilyMobile ?? defaults.terminalFontFamilyMobile,
         terminalFontSize: settings.terminalFontSize ?? defaults.terminalFontSize,
         terminalFontSizeMobile: settings.terminalFontSizeMobile ?? defaults.terminalFontSizeMobile,
         editorFontSize: settings.editorFontSize ?? defaults.editorFontSize,
@@ -162,6 +176,12 @@ case 'terminalTextStrokeEnabled':
         terminalTextShadowColor: terminalTextShadowColorFound
             ? settings.terminalTextShadowColor
             : defaults.terminalTextShadowColor,
+        terminalHighlightEnabled: terminalHighlightEnabledFound
+            ? settings.terminalHighlightEnabled
+            : defaults.terminalHighlightEnabled,
+        terminalHighlightRules: terminalHighlightRulesFound
+            ? settings.terminalHighlightRules
+            : defaults.terminalHighlightRules,
        updatedAt: latestUpdatedAt || defaults.updatedAt, // 使用最新的更新时间，否则使用默认时间戳
   };
 };
@@ -173,6 +193,7 @@ const getDefaultAppearanceSettings = (): Omit<AppearanceSettings, '_id'> => {
         customUiTheme: JSON.stringify(defaultUiTheme),
         activeTerminalThemeId: null, // 初始默认应为 null
         terminalFontFamily: 'Consolas, "Courier New", monospace, "Microsoft YaHei", "微软雅黑"',
+        terminalFontFamilyMobile: '-apple-system-monospaced, "SF Mono", Menlo, Monaco, "Roboto Mono", "Noto Sans Mono", monospace',
         terminalFontSize: 14,
         terminalFontSizeMobile: 14, // 移动端默认字体大小
         editorFontSize: 14,
@@ -195,6 +216,10 @@ const getDefaultAppearanceSettings = (): Omit<AppearanceSettings, '_id'> => {
         terminalTextShadowOffsetY: 2,
         terminalTextShadowBlur: 0,
         terminalTextShadowColor: '#000000',
+
+        // 终端关键字高亮规则默认值
+        terminalHighlightEnabled: false,
+        terminalHighlightRules: '',
        updatedAt: Date.now(), // 提供默认时间戳
   };
 };
@@ -215,6 +240,7 @@ export const ensureDefaultSettingsExist = async (db: sqlite3.Database): Promise<
         { key: 'customUiTheme', value: defaults.customUiTheme },
         { key: 'activeTerminalThemeId', value: null }, // 以 null 开始
         { key: 'terminalFontFamily', value: defaults.terminalFontFamily },
+        { key: 'terminalFontFamilyMobile', value: defaults.terminalFontFamilyMobile },
         { key: 'terminalFontSize', value: defaults.terminalFontSize },
         { key: 'terminalFontSizeMobile', value: defaults.terminalFontSizeMobile },
         { key: 'editorFontSize', value: defaults.editorFontSize },
@@ -234,29 +260,37 @@ export const ensureDefaultSettingsExist = async (db: sqlite3.Database): Promise<
         { key: 'terminalTextShadowOffsetY', value: defaults.terminalTextShadowOffsetY },
         { key: 'terminalTextShadowBlur', value: defaults.terminalTextShadowBlur },
         { key: 'terminalTextShadowColor', value: defaults.terminalTextShadowColor },
+        { key: 'terminalHighlightEnabled', value: defaults.terminalHighlightEnabled },
+        { key: 'terminalHighlightRules', value: defaults.terminalHighlightRules },
     ];
  
     try {
-        for (const entry of defaultEntries) {
-            // 将值转换为字符串以存储到数据库，处理 null/undefined
-            let dbValue: string;
-            if (entry.value === null || entry.value === undefined) {
-                dbValue = entry.key === 'activeTerminalThemeId' ? 'null' : ''; // 主题 ID 特殊存储为 'null'，其他情况为空字符串
-            } else if (typeof entry.value === 'object') {
-                dbValue = JSON.stringify(entry.value);
-            } else {
-                dbValue = String(entry.value);
+        const countRow = await getDb<{ count: number }>(db, `SELECT COUNT(*) as count FROM ${TABLE_NAME}`);
+        if (!countRow || countRow.count < defaultEntries.length) {
+            await runDb(db, 'BEGIN TRANSACTION');
+            try {
+                for (const entry of defaultEntries) {
+                    let dbValue: string;
+                    if (entry.value === null || entry.value === undefined) {
+                        dbValue = entry.key === 'activeTerminalThemeId' ? 'null' : '';
+                    } else if (typeof entry.value === 'object') {
+                        dbValue = JSON.stringify(entry.value);
+                    } else {
+                        dbValue = String(entry.value);
+                    }
+
+                    if (entry.key === 'activeTerminalThemeId') {
+                        dbValue = entry.value === null ? 'null' : String(entry.value);
+                    }
+
+                    await runDb(db, sqlInsertOrIgnore, [entry.key, dbValue, nowSeconds, nowSeconds]);
+                }
+                await runDb(db, 'COMMIT');
+            } catch (innerErr) {
+                await runDb(db, 'ROLLBACK');
+                throw innerErr;
             }
-
-            // 对 activeTerminalThemeId 的特殊处理：将 null 存储为 'null' 字符串，或将数字存储为字符串
-             if (entry.key === 'activeTerminalThemeId') {
-                 dbValue = entry.value === null ? 'null' : String(entry.value);
-             }
-
-
-            await runDb(db, sqlInsertOrIgnore, [entry.key, dbValue, nowSeconds, nowSeconds]);
         }
-        // console.log('[AppearanceRepo] 默认外观设置键值对检查完成。'); // 移除：信息不太关键
 
         // 确保键存在后，如果当前为 null，则尝试设置默认主题 ID
         await findAndSetDefaultThemeIdIfNull(db);

@@ -4,6 +4,7 @@ import { ref, computed } from 'vue';
 import i18n, { setLocale, defaultLng, availableLocales } from '../i18n'; 
 import type { PaneName } from './layout.store';
 import { useAuthStore } from './auth.store';
+import { isDesktopApp } from '../utils/platform';
 import type { ConnectionInfo } from './connections.store';
 
 export type SortField = keyof Pick<ConnectionInfo, 'created_at' | 'last_connected_at' | 'updated_at' | 'name' | 'type'>;
@@ -60,14 +61,41 @@ interface SettingsState {
   showQuickCommandTags?: string; // 'true' or 'false'
   layoutLocked?: string; // 'true' or 'false' - NEW: 布局锁定状态
   terminalScrollbackLimit?: string; //  终端回滚行数上限 (e.g., '5000', '0' for unlimited)
-  fileManagerShowDeleteConfirmation?: string; //  'true' or 'false' - 文件管理器删除确认提示
+  fileManagerShowDeleteConfirmation?: string;
+  fileManagerDoubleClickToOpen?: string; // 'true' or 'false' - 双击打开文件/文件夹 (默认 false) //  'true' or 'false' - 文件管理器删除确认提示
   terminalEnableRightClickPaste?: string; //  'true' or 'false' - 终端右键粘贴
+  terminalRightClickBehavior?: string; // 'contextMenu' | 'paste' | 'copy' | 'openPath' | 'openFile' | 'saveQuickCommand' | 'none'
+  terminalContextMenuItems?: string; // JSON string of TerminalContextMenuSettings
+  terminalNoWrap?: string; // 'true' or 'false' - 终端不换行 (默认 false)
   showStatusMonitorIpAddress?: string; // 'true' or 'false' - 状态监视器显示IP地址
   quickCommandRowSizeMultiplier?: string; // +++ 快捷命令列表行大小乘数 (e.g., '1.0') +++
   quickCommandsCompactMode?: string; // +++ 快捷指令视图紧凑模式 (e.g., 'false') +++
+  fileEditorModalWidth?: string; // 文本编辑器弹窗宽度 (px)
+  fileEditorModalHeight?: string; // 文本编辑器弹窗高度 (px)
+  markdownDefaultViewMode?: string; // 'preview' | 'split' | 'edit'
+  markdownDefaultViewModeMobile?: string; // 'preview' | 'split' | 'edit'
+  rememberLastRoute?: string; // 'true' or 'false' - 记住上次停留页面
   [key: string]: string | undefined;
 }
 
+
+export type TerminalRightClickBehavior = 'contextMenu' | 'paste' | 'copy' | 'openPath' | 'openFile' | 'saveQuickCommand' | 'none';
+
+export interface TerminalContextMenuSettings {
+  copy: boolean;
+  paste: boolean;
+  openPath: boolean;
+  openFile: boolean;
+  saveQuickCommand: boolean;
+}
+
+export const DEFAULT_TERMINAL_CONTEXT_MENU_ITEMS: TerminalContextMenuSettings = {
+  copy: true,
+  paste: true,
+  openPath: true,
+  openFile: true,
+  saveQuickCommand: true,
+};
 
 export const useSettingsStore = defineStore('settings', () => {
   const authStore = useAuthStore(); // <--- 实例化 authStore
@@ -115,6 +143,12 @@ export const useSettingsStore = defineStore('settings', () => {
       console.log('[SettingsStore] Fetched settings from backend:', JSON.stringify(settings.value));
 
       // --- 设置默认值 (如果后端未返回) ---
+      if (!settings.value.markdownDefaultViewMode) {
+          settings.value.markdownDefaultViewMode = 'split';
+      }
+      if (!settings.value.markdownDefaultViewModeMobile) {
+          settings.value.markdownDefaultViewModeMobile = 'preview';
+      }
       if (settings.value.showPopupFileEditor === undefined) {
           settings.value.showPopupFileEditor = 'true';
       }
@@ -299,6 +333,10 @@ export const useSettingsStore = defineStore('settings', () => {
         settings.value.fileManagerShowDeleteConfirmation = 'true'; // 默认显示删除确认
         console.log(`[SettingsStore] fileManagerShowDeleteConfirmation not found, set to default: ${settings.value.fileManagerShowDeleteConfirmation}`);
       }
+      if (settings.value.fileManagerDoubleClickToOpen === undefined) {
+        settings.value.fileManagerDoubleClickToOpen = 'false'; // 默认关闭双击打开 (单击即打开)
+        console.log(`[SettingsStore] fileManagerDoubleClickToOpen not found, set to default: ${settings.value.fileManagerDoubleClickToOpen}`);
+      }
       //  Terminal Right Click Paste default
       // --- 添加日志：打印从后端获取的原始值 ---
       console.log(`[SettingsStore DEBUG] Raw terminalEnableRightClickPaste from backend: '${settings.value.terminalEnableRightClickPaste}' (type: ${typeof settings.value.terminalEnableRightClickPaste})`);
@@ -306,6 +344,10 @@ export const useSettingsStore = defineStore('settings', () => {
       if (settings.value.terminalEnableRightClickPaste === undefined) {
         settings.value.terminalEnableRightClickPaste = 'true'; // 默认启用右键粘贴
         console.log(`[SettingsStore] terminalEnableRightClickPaste not found, set to default: ${settings.value.terminalEnableRightClickPaste}`);
+      }
+      if (settings.value.terminalNoWrap === undefined) {
+        settings.value.terminalNoWrap = 'false'; // 默认关闭不换行 (即自动换行)
+        console.log(`[SettingsStore] terminalNoWrap not found, set to default: ${settings.value.terminalNoWrap}`);
       }
       if (settings.value.showStatusMonitorIpAddress === undefined) {
         settings.value.showStatusMonitorIpAddress = 'false'; // 默认禁用状态监视器显示IP
@@ -320,6 +362,12 @@ export const useSettingsStore = defineStore('settings', () => {
       if (settings.value.quickCommandsCompactMode === undefined) {
         settings.value.quickCommandsCompactMode = 'false';
         console.log(`[SettingsStore] quickCommandsCompactMode not found, set to default: ${settings.value.quickCommandsCompactMode}`);
+      }
+      // +++ 记住上次停留页面默认值 (默认开启) +++
+      if (settings.value.rememberLastRoute === undefined) {
+        const localRemember = localStorage.getItem('nexus_remember_last_route');
+        settings.value.rememberLastRoute = localRemember !== null ? localRemember : 'true';
+        console.log(`[SettingsStore] rememberLastRoute not found, set to default: ${settings.value.rememberLastRoute}`);
       }
         
       // --- 从 localStorage 加载 QuickCommands 特有设置 ---
@@ -432,10 +480,19 @@ export const useSettingsStore = defineStore('settings', () => {
         'layoutLocked',
         'terminalScrollbackLimit',
         'fileManagerShowDeleteConfirmation',
+        'fileManagerDoubleClickToOpen',
         'terminalEnableRightClickPaste',
+        'terminalRightClickBehavior',
+        'terminalContextMenuItems',
+        'terminalNoWrap',
         'showStatusMonitorIpAddress',
         'quickCommandRowSizeMultiplier',
-        'quickCommandsCompactMode'
+        'quickCommandsCompactMode',
+        'fileEditorModalWidth',
+        'fileEditorModalHeight',
+        'markdownDefaultViewMode',
+        'markdownDefaultViewModeMobile',
+        'rememberLastRoute'
       ];
       if (!allowedKeys.includes(key)) {
           console.error(`[SettingsStore] 尝试更新不允许的设置键: ${key}`);
@@ -541,10 +598,19 @@ export const useSettingsStore = defineStore('settings', () => {
         'layoutLocked',
         'terminalScrollbackLimit',
         'fileManagerShowDeleteConfirmation',
+        'fileManagerDoubleClickToOpen',
         'terminalEnableRightClickPaste',
+        'terminalRightClickBehavior',
+        'terminalContextMenuItems',
+        'terminalNoWrap',
         'showStatusMonitorIpAddress',
         'quickCommandRowSizeMultiplier',
-        'quickCommandsCompactMode'
+        'quickCommandsCompactMode',
+        'fileEditorModalWidth',
+        'fileEditorModalHeight',
+        'markdownDefaultViewMode',
+        'markdownDefaultViewModeMobile',
+        'rememberLastRoute'
       ];
       const filteredUpdates: Partial<SettingsState> = {};
       let languageUpdate: string | undefined = undefined;
@@ -861,14 +927,91 @@ export const useSettingsStore = defineStore('settings', () => {
   });
 
   //  Getter for File Manager delete confirmation, returning boolean
+  const fileManagerDoubleClickToOpenBoolean = computed(() => {
+      return settings.value.fileManagerDoubleClickToOpen === 'true'; // Default to false
+  });
+
   const fileManagerShowDeleteConfirmationBoolean = computed(() => {
       return settings.value.fileManagerShowDeleteConfirmation !== 'false'; // Default to true
   });
 
   //  Getter for Terminal Right Click Paste, returning boolean
+  const terminalNoWrapBoolean = computed(() => {
+      return settings.value.terminalNoWrap === 'true'; // Default to false
+  });
+
+  const terminalRightClickBehaviorString = computed<TerminalRightClickBehavior>(() => {
+    const val = settings.value.terminalRightClickBehavior;
+    const validValues: TerminalRightClickBehavior[] = ['contextMenu', 'paste', 'copy', 'openPath', 'openFile', 'saveQuickCommand', 'none'];
+    if (val && validValues.includes(val as TerminalRightClickBehavior)) {
+      return val as TerminalRightClickBehavior;
+    }
+    if (settings.value.terminalEnableRightClickPaste === 'false') {
+      return 'none';
+    }
+    return 'contextMenu';
+  });
+
+  const terminalContextMenuItemsObject = computed<TerminalContextMenuSettings>(() => {
+    const valStr = settings.value.terminalContextMenuItems;
+    if (!valStr) {
+      return { ...DEFAULT_TERMINAL_CONTEXT_MENU_ITEMS };
+    }
+    try {
+      const parsed = JSON.parse(valStr);
+      return {
+        copy: parsed.copy !== false,
+        paste: parsed.paste !== false,
+        openPath: parsed.openPath !== false,
+        openFile: parsed.openFile !== false,
+        saveQuickCommand: parsed.saveQuickCommand !== false,
+      };
+    } catch {
+      return { ...DEFAULT_TERMINAL_CONTEXT_MENU_ITEMS };
+    }
+  });
+
+  const updateTerminalRightClickBehavior = async (behavior: TerminalRightClickBehavior) => {
+    await updateSetting('terminalRightClickBehavior', behavior);
+  };
+
+  const updateTerminalContextMenuItems = async (items: TerminalContextMenuSettings) => {
+    await updateSetting('terminalContextMenuItems', JSON.stringify(items));
+  };
+
   const terminalEnableRightClickPasteBoolean = computed(() => {
       return settings.value.terminalEnableRightClickPaste !== 'false'; // Default to true
   });
+
+    // Getter for remember last route setting, returning boolean
+  const rememberLastRouteBoolean = computed(() => {
+    return settings.value.rememberLastRoute !== 'false';
+  });
+
+  async function setRememberLastRoute(enabled: boolean) {
+    const strVal = enabled ? 'true' : 'false';
+    try {
+      localStorage.setItem('nexus_remember_last_route', strVal);
+      if (!enabled) {
+        localStorage.removeItem('nexus_last_route');
+        if (isDesktopApp()) {
+          apiClient.post('/desktop/route', { clear: true }).catch(() => {});
+        }
+      } else {
+        const currentPath = window.location.pathname;
+        if (currentPath && currentPath !== '/login' && currentPath !== '/setup') {
+          localStorage.setItem('nexus_last_route', currentPath);
+          if (isDesktopApp()) {
+            apiClient.post('/desktop/route', { route: currentPath }).catch(() => {});
+          }
+        }
+      }
+      await updateSetting('rememberLastRoute', strVal);
+    } catch (err) {
+      console.error('[SettingsStore] 保存 rememberLastRoute 失败:', err);
+      throw err;
+    }
+  }
 
   const statusMonitorShowIpBoolean = computed(() => {
     return settings.value.showStatusMonitorIpAddress === 'true';
@@ -889,7 +1032,47 @@ export const useSettingsStore = defineStore('settings', () => {
     return settings.value.quickCommandsCompactMode === 'true';
   });
   
+  const setFileEditorModalSize = async (width: number, height: number) => {
+    const w = String(Math.round(width));
+    const h = String(Math.round(height));
+    if (settings.value.fileEditorModalWidth === w && settings.value.fileEditorModalHeight === h) {
+      return;
+    }
+    settings.value.fileEditorModalWidth = w;
+    settings.value.fileEditorModalHeight = h;
+    try {
+      await updateMultipleSettings({
+        fileEditorModalWidth: w,
+        fileEditorModalHeight: h,
+      });
+    } catch (e) {
+      console.warn('[SettingsStore] 保存文本编辑器窗口尺寸失败:', e);
+    }
+  };
+  const markdownDefaultViewModeString = computed<'preview' | 'split' | 'edit'>(() => {
+    const val = settings.value.markdownDefaultViewMode;
+    return (val === 'preview' || val === 'edit') ? val : 'split';
+  });
+
+  const markdownDefaultViewModeMobileString = computed<'preview' | 'split' | 'edit'>(() => {
+    const val = settings.value.markdownDefaultViewModeMobile;
+    return (val === 'split' || val === 'edit') ? val : 'preview';
+  });
+
+  const updateMarkdownDefaultViewMode = async (mode: 'preview' | 'split' | 'edit') => {
+    await updateSetting('markdownDefaultViewMode', mode);
+  };
+
+  const updateMarkdownDefaultViewModeMobile = async (mode: 'preview' | 'split' | 'edit') => {
+    await updateSetting('markdownDefaultViewModeMobile', mode);
+  };
+
  return {
+    setFileEditorModalSize,
+    markdownDefaultViewModeString,
+    markdownDefaultViewModeMobileString,
+    updateMarkdownDefaultViewMode,
+    updateMarkdownDefaultViewModeMobile,
     settings, // 只包含通用设置
     isLoading,
     error,
@@ -935,7 +1118,15 @@ export const useSettingsStore = defineStore('settings', () => {
     layoutLockedBoolean,
     terminalScrollbackLimitNumber, //  Expose terminal scrollback limit getter
     fileManagerShowDeleteConfirmationBoolean, //  Expose file manager delete confirmation getter
+    fileManagerDoubleClickToOpenBoolean, //  Expose file manager double click to open getter
     terminalEnableRightClickPasteBoolean, //  Expose terminal right click paste getter
+    terminalRightClickBehaviorString,
+    terminalContextMenuItemsObject,
+    updateTerminalRightClickBehavior,
+    updateTerminalContextMenuItems,
+    terminalNoWrapBoolean, // Expose terminal no wrap getter
     statusMonitorShowIpBoolean, // 暴露状态监视器显示IP getter
+    rememberLastRouteBoolean, // 暴露记住上次停留页面 getter
+    setRememberLastRoute, // 暴露设置记住上次停留页面 action
   };
   });

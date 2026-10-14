@@ -18,7 +18,7 @@ export const getAllQuickCommandTags = async (req: Request, res: Response): Promi
  * 处理添加新快捷指令标签的请求
  */
 export const addQuickCommandTag = async (req: Request, res: Response): Promise<void> => {
-    const { name } = req.body;
+    const { name, background_color } = req.body;
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
         res.status(400).json({ message: '标签名称不能为空且必须是字符串' });
@@ -26,7 +26,7 @@ export const addQuickCommandTag = async (req: Request, res: Response): Promise<v
     }
 
     try {
-        const newId = await QuickCommandTagService.addQuickCommandTag(name);
+        const newId = await QuickCommandTagService.addQuickCommandTag(name, background_color);
         // 成功添加后，获取新创建的标签信息返回给前端
         const newTag = await QuickCommandTagService.getQuickCommandTagById(newId);
         if (newTag) {
@@ -52,19 +52,19 @@ export const addQuickCommandTag = async (req: Request, res: Response): Promise<v
  */
 export const updateQuickCommandTag = async (req: Request, res: Response): Promise<void> => {
     const id = parseInt(req.params.id, 10);
-    const { name } = req.body;
+    const { name, background_color } = req.body;
 
     if (isNaN(id)) {
         res.status(400).json({ message: '无效的标签 ID' });
         return;
     }
-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    if (typeof name !== 'undefined' && (typeof name !== 'string' || name.trim().length === 0)) {
         res.status(400).json({ message: '标签名称不能为空且必须是字符串' });
         return;
     }
 
     try {
-        const success = await QuickCommandTagService.updateQuickCommandTag(id, name);
+        const success = await QuickCommandTagService.updateQuickCommandTag(id, name, background_color);
         if (success) {
             // 成功更新后，获取更新后的标签信息返回给前端
             const updatedTag = await QuickCommandTagService.getQuickCommandTagById(id);
@@ -107,6 +107,8 @@ export const deleteQuickCommandTag = async (req: Request, res: Response): Promis
         return;
     }
 
+    const deleteCommands = req.query.deleteCommands === 'true' || req.body?.deleteCommands === true;
+
     try {
         // 先检查标签是否存在，以便返回 404
         const tagExists = await QuickCommandTagService.getQuickCommandTagById(id);
@@ -115,9 +117,9 @@ export const deleteQuickCommandTag = async (req: Request, res: Response): Promis
              return;
         }
 
-        const success = await QuickCommandTagService.deleteQuickCommandTag(id);
+        const success = await QuickCommandTagService.deleteQuickCommandTag(id, deleteCommands);
         if (success) {
-            res.status(200).json({ message: '快捷指令标签已删除' });
+            res.status(200).json({ message: deleteCommands ? '快捷指令分组及其中指令已删除' : '快捷指令标签已删除' });
         } else {
              // 如果上面检查存在但删除失败，说明有内部错误
              console.error(`[Controller] 删除快捷指令标签 ${id} 失败，但标签存在。`);

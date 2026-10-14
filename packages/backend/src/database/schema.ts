@@ -5,7 +5,9 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY NOT NULL,
     value TEXT NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    uuid TEXT NULL,
+    updated_hlc TEXT NULL
 );
 `;
 
@@ -96,7 +98,8 @@ CREATE TABLE IF NOT EXISTS connections (
     ssh_key_id INTEGER NULL, 
 notes TEXT NULL,
 jump_chain TEXT NULL,
-proxy_type TEXT NULL, 
+proxy_type TEXT NULL,
+background_color TEXT NULL,
 created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
     updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
     last_connected_at INTEGER NULL,
@@ -120,6 +123,7 @@ export const createTagsTableSQL = `
 CREATE TABLE IF NOT EXISTS tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL,
+    background_color TEXT NULL,
     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
     updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
@@ -148,7 +152,9 @@ export const createCommandHistoryTableSQL = `
 CREATE TABLE IF NOT EXISTS command_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     command TEXT NOT NULL,
-    timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+    timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    uuid TEXT NULL,
+    updated_hlc TEXT NULL
 );
 `;
 
@@ -167,6 +173,7 @@ CREATE TABLE IF NOT EXISTS quick_commands (
     command TEXT NOT NULL, -- 指令必选
     usage_count INTEGER NOT NULL DEFAULT 0, -- 使用频率
     variables TEXT NULL,
+    background_color TEXT NULL,
     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
     updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
@@ -178,6 +185,7 @@ export const createQuickCommandTagsTableSQL = `
 CREATE TABLE IF NOT EXISTS quick_command_tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
+    background_color TEXT NULL,
     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
     updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
@@ -245,3 +253,38 @@ CREATE TABLE IF NOT EXISTS favorite_paths (
     updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
 `;
+
+export const createWorkspaceSyncTableSQL = `
+CREATE TABLE IF NOT EXISTS workspace_sync (
+    user_id INTEGER PRIMARY KEY NOT NULL,
+    state TEXT NOT NULL DEFAULT '{}',
+    active_client_id TEXT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+`;
+
+export const createSyncTombstonesTableSQL = `
+CREATE TABLE IF NOT EXISTS sync_tombstones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,
+    uuid TEXT NOT NULL,
+    deleted_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+`;
+
+export const createFileColorHighlightsTableSQL = `
+CREATE TABLE IF NOT EXISTS file_color_highlights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    connection_id INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    color TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    uuid TEXT NULL,
+    updated_hlc TEXT NULL,
+    FOREIGN KEY (connection_id) REFERENCES connections(id) ON DELETE CASCADE,
+    UNIQUE(connection_id, path)
+);
+`;
+

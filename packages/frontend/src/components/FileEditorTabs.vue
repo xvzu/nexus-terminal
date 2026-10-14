@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, type PropType, onBeforeUnmount } from 'vue'; // + ref, computed, onBeforeUnmount
+import { ref, computed, type PropType, onBeforeUnmount } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { FileTab } from '../stores/fileEditor.store';
-import TabBarContextMenu from './TabBarContextMenu.vue'; // + Import context menu
+import TabBarContextMenu from './TabBarContextMenu.vue';
+import MobileFileEditorTabs from './MobileFileEditorTabs.vue';
 
 const props = defineProps({
   tabs: {
@@ -13,15 +14,20 @@ const props = defineProps({
     type: String as PropType<string | null>,
     default: null,
   },
+  isMobile: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits<{
   (e: 'activate-tab', tabId: string): void;
   (e: 'close-tab', tabId: string): void;
-  // + 新增右键菜单事件
   (e: 'close-other-tabs', tabId: string): void;
   (e: 'close-tabs-to-right', tabId: string): void;
   (e: 'close-tabs-to-left', tabId: string): void;
+  (e: 'split-right', tabId: string): void;
+  (e: 'split-down', tabId: string): void;
 }>();
 
 const { t } = useI18n();
@@ -29,8 +35,8 @@ const { t } = useI18n();
 // +++ 右键菜单状态 +++
 const contextMenuVisible = ref(false);
 const contextMenuPosition = ref({ x: 0, y: 0 });
-const contextTargetTabId = ref<string | null>(null); // Keep for logic inside this component if needed elsewhere
-const menuTargetId = ref<string | null>(null); // + Ref specifically for passing to the menu prop
+const contextTargetTabId = ref<string | null>(null);
+const menuTargetId = ref<string | null>(null);
 
 const handleActivate = (tabId: string) => {
   emit('activate-tab', tabId);
@@ -92,6 +98,12 @@ const handleContextMenuAction = (payload: { action: string; targetId: string | n
     case 'close-left':
       emit('close-tabs-to-left', targetId);
       break;
+    case 'split-right':
+      emit('split-right', targetId);
+      break;
+    case 'split-down':
+      emit('split-down', targetId);
+      break;
     default:
       console.warn(`[FileTabs] Unknown context menu action: ${action}`);
   }
@@ -120,18 +132,37 @@ const contextMenuItems = computed(() => {
     items.push({ label: 'tabs.contextMenu.closeLeft', action: 'close-left' });
   }
 
+  // VSCode 分屏拆分菜单项
+  items.push({ isSeparator: true, label: '', action: '' });
+  items.push({ label: 'editor.splitRight', action: 'split-right' });
+  items.push({ label: 'editor.splitDown', action: 'split-down' });
+
   return items;
 });
 
 // +++ 组件卸载前移除全局监听器 +++
 onBeforeUnmount(() => {
-    document.removeEventListener('click', closeContextMenuOnClickOutside, { capture: true });
+  document.removeEventListener('click', closeContextMenuOnClickOutside, { capture: true });
 });
-
 </script>
 
 <template>
-  <div class="file-editor-tabs">
+  <!-- 移动端专属标签栏组件 -->
+  <MobileFileEditorTabs
+    v-if="props.isMobile"
+    :tabs="props.tabs"
+    :active-tab-id="props.activeTabId"
+    @activate-tab="(id: string) => emit('activate-tab', id)"
+    @close-tab="(id: string) => emit('close-tab', id)"
+    @close-other-tabs="(id: string) => emit('close-other-tabs', id)"
+    @close-tabs-to-right="(id: string) => emit('close-tabs-to-right', id)"
+    @close-tabs-to-left="(id: string) => emit('close-tabs-to-left', id)"
+    @split-right="(id: string) => emit('split-right', id)"
+    @split-down="(id: string) => emit('split-down', id)"
+  />
+
+  <!-- 桌面端全功能标签栏 -->
+  <div v-else class="file-editor-tabs">
     <div
       v-for="tab in tabs"
       :key="tab.id"
@@ -139,7 +170,7 @@ onBeforeUnmount(() => {
       class="tab-item"
       :class="{ active: tab.id === activeTabId }"
       @click="handleActivate(tab.id)"
-      @contextmenu.prevent="(event) => { console.log(`[FileTabs Template Debug] Context menu for tab.id: ${tab.id}`); showContextMenu(event, tab.id); }"
+      @contextmenu.prevent="(event) => showContextMenu(event, tab.id)"
       :title="tab.filePath"
     >
       <span class="tab-filename">{{ tab.filename }}</span>
@@ -194,7 +225,6 @@ onBeforeUnmount(() => {
   background-color: #666;
 }
 
-
 .tab-item {
   display: flex;
   align-items: center;
@@ -237,7 +267,6 @@ onBeforeUnmount(() => {
     color: #ffffff; /* 激活标签的修改指示器颜色 */
 }
 
-
 .close-tab-btn {
   background: none;
   border: none;
@@ -263,6 +292,5 @@ onBeforeUnmount(() => {
 
 .no-tabs-placeholder {
     flex-grow: 1; /* 占据剩余空间 */
-    /* 可以添加样式 */
 }
 </style>

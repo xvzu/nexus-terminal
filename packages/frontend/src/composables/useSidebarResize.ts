@@ -14,7 +14,7 @@ export function useSidebarResize({
   handleRef,
   side,
   minWidth = 200, // 默认最小宽度
-  maxWidth = 800, // 默认最大宽度
+  maxWidth = 1400, // 默认最大宽度（连接宫格一排6个约需900px）
   onResizeEnd,
 }: UseSidebarResizeOptions) {
   const isDragging = ref(false);

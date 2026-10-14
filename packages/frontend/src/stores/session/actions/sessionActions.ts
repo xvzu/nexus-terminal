@@ -4,7 +4,7 @@ import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useConnectionsStore, type ConnectionInfo } from '../../connections.store'; 
-import { sessions, activeSessionId } from '../state';
+import { sessions, activeSessionId, sessionOrder } from '../state';
 import { generateSessionId } from '../utils';
 import type { SessionState, SshTerminalInstance, StatusMonitorInstance, DockerManagerInstance, SftpManagerInstance, WsManagerInstance } from '../types';
 
@@ -14,6 +14,10 @@ import { createSshTerminalManager, type SshTerminalDependencies } from '../../..
 import { createStatusMonitorManager, type StatusMonitorDependencies } from '../../../composables/useStatusMonitor';
 import { createDockerManager, type DockerManagerDependencies } from '../../../composables/useDockerManager';
 import { registerSshSuspendHandlers } from './sshSuspendActions'; 
+import { isRemoteDesktopSupported } from '../../../utils/platform';
+import { useUiNotificationsStore } from '../../uiNotifications.store'; 
+import apiClient from '../../../utils/apiClient';
+import { useWorkspaceSyncStore } from '../../workspaceSync.store';
 
 
 // --- 辅助函数 (特定于此模块的 actions) ---
@@ -28,8 +32,9 @@ export const openNewSession = (
         connectionsStore: ReturnType<typeof useConnectionsStore>;
         t: ReturnType<typeof useI18n>['t'];
     },
-    existingSessionId?: string // 可选的预定义会话 ID
-) => {
+    existingSessionId?: string, // 可选的预定义会话 ID
+    shouldActivate: boolean = true // 是否在创建后立即激活此会话，默认为 true
+): string | undefined => {
   const { connectionsStore, t } = dependencies;
   let connInfo: ConnectionInfo | undefined;
   let connIdForLog: string | number;
@@ -107,60 +112,93 @@ export const openNewSession = (
       terminalManager: terminalManager,
       statusMonitorManager: statusMonitorManager,
       dockerManager: dockerManager,
+      shouldActivateOnResume: shouldActivate, // 记录是否在唤醒/就绪后允许激活
   };
   // newSession.isMarkedForSuspend 已经在 newSessionPartial 中初始化为 false
 
-  // 3. 添加到 Map 并激活
+  // 3. 添加到 Map 并根据 shouldActivate 决定是否立即激活
   const newSessionsMap = new Map(sessions.value);
   newSessionsMap.set(newSessionId, newSession);
   sessions.value = newSessionsMap;
-  activeSessionId.value = newSessionId;
-  console.log(`[SessionActions] 已创建新会话实例: ${newSessionId} for connection ${dbConnId}`);
+  if (shouldActivate) {
+    activeSessionId.value = newSessionId;
+  }
+  if (!sessionOrder.value.includes(newSessionId)) {
+    sessionOrder.value = [...sessionOrder.value, newSessionId];
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('sessionOrder', JSON.stringify(sessionOrder.value));
+    }
+  }
+  console.log(`[SessionActions] 已创建新会话实例: ${newSessionId} for connection ${dbConnId} (shouldActivate: ${shouldActivate})`);
 
   // +++ 在连接前设置 ssh:connected 处理器以更新 sessionId +++
-  const originalFrontendSessionIdForHandler = newSessionId; // 捕获初始ID给闭包
+  let currentSessionKey = newSessionId; // 动态跟踪当前会话的 Key
 
   const unregisterConnectedHandler = wsManager.onMessage('ssh:connected', (connectedPayload: any) => {
     const backendSID = connectedPayload.sessionId as string;
     const backendCID = String(connectedPayload.connectionId);
 
-    console.log(`[SessionActions/ssh:connected] 收到消息。前端初始SID: ${originalFrontendSessionIdForHandler}, 后端SID: ${backendSID}, 后端CID: ${backendCID}`);
+    console.log(`[SessionActions/ssh:connected] 收到消息。当前会话Key: ${currentSessionKey}, 后端SID: ${backendSID}, 后端CID: ${backendCID}`);
 
-    const sessionToUpdate = sessions.value.get(originalFrontendSessionIdForHandler);
+    // 优先通过当前记录的 key 查找；如果找不到，通过 wsManager 引用在 Map 中定位
+    let sessionToUpdate = sessions.value.get(currentSessionKey);
+    let matchedKey = currentSessionKey;
+
+    if (!sessionToUpdate) {
+      for (const [key, s] of sessions.value.entries()) {
+        if (s.wsManager === wsManager) {
+          sessionToUpdate = s;
+          matchedKey = key;
+          break;
+        }
+      }
+    }
 
     if (sessionToUpdate) {
       if (sessionToUpdate.connectionId !== backendCID) {
-        console.warn(`[SessionActions/ssh:connected] 后端CID ${backendCID} 与会话 ${originalFrontendSessionIdForHandler} 的期望CID ${sessionToUpdate.connectionId} 不匹配。终止SID更新。`);
+        console.warn(`[SessionActions/ssh:connected] 后端CID ${backendCID} 与会话 ${matchedKey} 的期望CID ${sessionToUpdate.connectionId} 不匹配。终止SID更新。`);
         return;
       }
 
-      if (backendSID && backendSID !== originalFrontendSessionIdForHandler) {
-        console.log(`[SessionActions/ssh:connected] 会话ID需要更新：从 ${originalFrontendSessionIdForHandler} 到 ${backendSID}。`);
+      if (backendSID && backendSID !== matchedKey) {
+        console.log(`[SessionActions/ssh:connected] 会话ID需要更新：从 ${matchedKey} 到 ${backendSID}。`);
         const currentSessions = new Map(sessions.value);
-        currentSessions.delete(originalFrontendSessionIdForHandler);
+        currentSessions.delete(matchedKey);
 
         sessionToUpdate.sessionId = backendSID; // 更新会话对象内部的sessionId
 
         currentSessions.set(backendSID, sessionToUpdate);
         sessions.value = currentSessions;
 
-        if (activeSessionId.value === originalFrontendSessionIdForHandler) {
+        if (activeSessionId.value === matchedKey) {
           activeSessionId.value = backendSID;
           console.log(`[SessionActions/ssh:connected] 活动会话ID已更新为 ${backendSID}。`);
         }
+        currentSessionKey = backendSID; // 更新闭包中的跟踪键，确保后续重连能继续正确定位
         console.log(`[SessionActions/ssh:connected] 会话存储已更新，新键为 ${backendSID}。`);
-      } else if (backendSID === originalFrontendSessionIdForHandler) {
-        console.log(`[SessionActions/ssh:connected] 后端SID ${backendSID} 与前端SID匹配。无需重新键控。`);
+
+        // 关键修复：同步将 sessionOrder 中的 matchedKey 原位替换为 backendSID，绝不破坏用户排好的顺序！
+        if (sessionOrder.value.includes(matchedKey)) {
+          const nextOrder = sessionOrder.value.map(id => id === matchedKey ? backendSID : id);
+          sessionOrder.value = nextOrder;
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('sessionOrder', JSON.stringify(nextOrder));
+          }
+          console.log(`[SessionActions/ssh:connected] sessionOrder 已将 ${matchedKey} 原位替换为 ${backendSID}`);
+        } else if (!sessionOrder.value.includes(backendSID)) {
+          sessionOrder.value = [...sessionOrder.value, backendSID];
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('sessionOrder', JSON.stringify(sessionOrder.value));
+          }
+        }
+      } else if (backendSID === matchedKey) {
+        console.log(`[SessionActions/ssh:connected] 后端SID ${backendSID} 与前端当前Key匹配。无需重新键控。`);
       } else {
         console.error(`[SessionActions/ssh:connected] 从后端收到的 ssh:connected 消息中缺少有效的sessionId。Payload:`, connectedPayload);
       }
     } else {
-      console.warn(`[SessionActions/ssh:connected] 当处理后端SID ${backendSID} 时，在存储中未找到对应的前端初始SID ${originalFrontendSessionIdForHandler} 的会话。`);
+      console.warn(`[SessionActions/ssh:connected] 当处理后端SID ${backendSID} 时，在存储中未找到对应的会话。`);
     }
-    // 此处理器主要用于初始的 sessionId 同步，通常在第一次收到 ssh:connected 后就可以注销，
-    // 以避免后续可能的意外重连消息再次触发此逻辑。
-    // 但如果 backendID 保证在 ssh:connected 时才首次确定，则保留可能也无害。
-    // 为简单起见，暂不在此处自动注销。注销将在 closeSession 中处理。
   });
 
   if (newSession.disposables) {
@@ -185,6 +223,7 @@ export const openNewSession = (
   } else if (connInfo) {
     console.log(`[SessionActions] 会话 ${newSessionId} 类型为 ${connInfo.type}，不注册 SSH 挂起处理器。`);
   }
+  return newSessionId;
 };
 
 export const activateSession = (sessionId: string) => {
@@ -241,12 +280,37 @@ export const closeSession = (sessionId: string) => {
   sessions.value = newSessionsMap;
   console.log(`[SessionActions] 已从 Map 中移除会话: ${sessionId}`);
 
+  // 同步从 sessionOrder 中移除
+  if (sessionOrder.value.includes(sessionId)) {
+    sessionOrder.value = sessionOrder.value.filter(id => id !== sessionId);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('sessionOrder', JSON.stringify(sessionOrder.value));
+    }
+  }
+
   // 3. 切换活动标签页
   if (activeSessionId.value === sessionId) {
     const remainingSessions = Array.from(sessions.value.keys());
     const nextActiveId = remainingSessions.length > 0 ? remainingSessions[remainingSessions.length - 1] : null;
     activeSessionId.value = nextActiveId;
     console.log(`[SessionActions] 关闭活动会话后，切换到: ${nextActiveId}`);
+  }
+
+  // 4. 【核心强制销毁】立即调用后端原子销毁接口：强制切断SSH + 彻底清理挂起 + 强制从数据库快照剔除落盘（仅针对该 sessionId）
+  apiClient.delete(`/workspace-sync/sessions/${sessionId}`).then((res) => {
+    console.log(`[SessionActions] 会话 ${sessionId} 已成功由后端原子销毁并落盘:`, res.data);
+  }).catch((err) => {
+    console.warn(`[SessionActions] 调用后端原子销毁接口失败:`, err);
+  });
+
+  // 5. 立即同步当前剩余会话至云端快照
+  try {
+    const workspaceSyncStore = useWorkspaceSyncStore();
+    if (workspaceSyncStore.syncEnabled && !workspaceSyncStore.isRestoring && !workspaceSyncStore.isTakenOver) {
+      workspaceSyncStore.saveWorkspaceToCloud();
+    }
+  } catch (syncErr) {
+    console.warn('[SessionActions] 关闭会话后触发工作区云端持久化异常:', syncErr);
   }
 };
 
@@ -263,8 +327,22 @@ export const handleConnectRequest = (
   const { connectionsStore, router, openRdpModalAction, openVncModalAction, t } = dependencies;
 
   if (connection.type === 'RDP') {
+    if (!isRemoteDesktopSupported()) {
+      useUiNotificationsStore().addNotification({
+        type: 'warning',
+        message: '当前桌面客户端暂不支持 RDP 远程桌面，请使用 Web 端或 Docker 部署环境访问。'
+      });
+      return;
+    }
     openRdpModalAction(connection);
   } else if (connection.type === 'VNC') {
+    if (!isRemoteDesktopSupported()) {
+      useUiNotificationsStore().addNotification({
+        type: 'warning',
+        message: '当前桌面客户端暂不支持 VNC 远程桌面，请使用 Web 端或 Docker 部署环境访问。'
+      });
+      return;
+    }
     openVncModalAction(connection);
   } else {
     const connIdStr = String(connection.id);

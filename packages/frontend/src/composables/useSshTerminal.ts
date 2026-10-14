@@ -4,7 +4,10 @@ import { sessions as globalSessionsRef } from '../stores/session/state'; // +++ 
 // import { useWebSocketConnection } from './useWebSocketConnection'; // 移除全局导入
 import type { Terminal } from 'xterm';
 import type { SearchAddon, ISearchOptions } from '@xterm/addon-search'; // *** 移除 ISearchResult 导入 ***
+import type { SerializeAddon } from '@xterm/addon-serialize';
 import type { WebSocketMessage, MessagePayload } from '../types/websocket.types';
+import { useTerminalHighlightStore } from '../stores/terminal-highlight.store';
+import { useWorkspaceSyncStore } from '../stores/workspaceSync.store';
 
 // 定义与 WebSocket 相关的依赖接口
 export interface SshTerminalDependencies {
@@ -23,14 +26,33 @@ export interface SshTerminalDependencies {
 export function createSshTerminalManager(sessionId: string, wsDeps: SshTerminalDependencies, t: ReturnType<typeof useI18n>['t']) { // +++ Update type of t +++
     // 使用依赖注入的 WebSocket 函数
     const { sendMessage, onMessage, isConnected } = wsDeps;
+    const highlightStore = useTerminalHighlightStore();
 
     const terminalInstance = ref<Terminal | null>(null);
     const searchAddon = ref<SearchAddon | null>(null); // Keep searchAddon ref
+    const serializeAddon = ref<SerializeAddon | null>(null); // 保存 SerializeAddon 实例
     // Removed search result state refs
     // const searchResultCount = ref(0);
     // const currentSearchResultIndex = ref(-1);
     const terminalOutputBuffer = ref<(string | Uint8Array)[]>([]); // 缓冲 WebSocket 消息直到终端准备好
     const isSshConnected = ref(false); // 跟踪 SSH 连接状态
+    const hasConnectedBefore = ref(false); // 跟踪是否曾经连接过（用于识别重连事件）
+
+    // 终端数据流防抖同步至云端工作区 (输出停歇 1.5s 后触发，命令执行中自动延后)
+    let terminalSyncTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleTerminalSync = (delayMs: number = 1500) => {
+        if (terminalSyncTimer) clearTimeout(terminalSyncTimer);
+        terminalSyncTimer = setTimeout(() => {
+            try {
+                const workspaceSyncStore = useWorkspaceSyncStore();
+                if (workspaceSyncStore.syncEnabled && !workspaceSyncStore.isRestoring && !workspaceSyncStore.isTakenOver) {
+                    workspaceSyncStore.triggerDebouncedSave(0);
+                }
+            } catch {
+                // Pinia 上下文未就绪时安全忽略
+            }
+        }, delayMs);
+    };
 
     // 辅助函数：获取终端消息文本
     const getTerminalText = (key: string, params?: Record<string, any>): string => {
@@ -42,12 +64,13 @@ export function createSshTerminalManager(sessionId: string, wsDeps: SshTerminalD
 
     // --- 终端事件处理 ---
 
-    // *** 更新 handleTerminalReady 签名以接收 searchAddon ***
-    const handleTerminalReady = (payload: { terminal: Terminal; searchAddon: SearchAddon | null }) => {
-        const { terminal: term, searchAddon: addon } = payload;
-        console.log(`[会话 ${sessionId}][SSH终端模块] 终端实例已就绪。SearchAddon 实例:`, addon ? '存在' : '不存在');
+    // *** 更新 handleTerminalReady 签名以接收 searchAddon 与 serializeAddon ***
+    const handleTerminalReady = (payload: { terminal: Terminal; searchAddon: SearchAddon | null; serializeAddon?: SerializeAddon | null }) => {
+        const { terminal: term, searchAddon: addon, serializeAddon: sAddon } = payload;
+        console.log(`[会话 ${sessionId}][SSH终端模块] 终端实例已就绪。SearchAddon: ${addon ? '存在' : '不存在'}, SerializeAddon: ${sAddon ? '存在' : '不存在'}`);
         terminalInstance.value = term;
         searchAddon.value = addon; // *** 存储 searchAddon 实例 ***
+        serializeAddon.value = sAddon || null; // *** 存储 serializeAddon 实例 ***
 
         
         // 1. 处理 SessionState.pendingOutput (来自 SSH_OUTPUT_CACHED_CHUNK 的早期数据)
@@ -55,7 +78,8 @@ export function createSshTerminalManager(sessionId: string, wsDeps: SshTerminalD
         if (currentSessionState && currentSessionState.pendingOutput && currentSessionState.pendingOutput.length > 0) {
             // console.log(`[会话 ${sessionId}][SSH终端模块] 发现 SessionState.pendingOutput，长度: ${currentSessionState.pendingOutput.length}。正在写入...`);
             currentSessionState.pendingOutput.forEach(data => {
-                term.write(data);
+                const normalizedData = typeof data === 'string' ? data.replace(/\r?\n/g, '\r\n') : data;
+                term.write(highlightStore.highlight(normalizedData));
             });
             currentSessionState.pendingOutput = []; // 清空
             // console.log(`[会话 ${sessionId}][SSH终端模块] SessionState.pendingOutput 处理完毕。`);
@@ -71,7 +95,7 @@ export function createSshTerminalManager(sessionId: string, wsDeps: SshTerminalD
         // 2. 将此管理器内部缓冲的输出 (terminalOutputBuffer, 来自 ssh:output) 写入终端
         if (terminalOutputBuffer.value.length > 0) {
             terminalOutputBuffer.value.forEach(data => {
-                 term.write(data);
+                 term.write(highlightStore.highlight(data));
             });
             terminalOutputBuffer.value = []; // 清空内部缓冲区
         }
@@ -142,9 +166,9 @@ export function createSshTerminalManager(sessionId: string, wsDeps: SshTerminalD
         // --------------------
 
         if (terminalInstance.value) {
-            // console.log(`[会话 ${sessionId}][SSH前端] 终端实例存在，尝试写入...`);
-            terminalInstance.value.write(outputData);
-            // console.log(`[会话 ${sessionId}][SSH前端] 写入完成。`);
+            terminalInstance.value.write(highlightStore.highlight(outputData));
+            // 终端数据输出写入后安排 1.5s 防抖同步至云端工作区
+            scheduleTerminalSync(1500);
         } else {
             // 如果终端还没准备好，先缓冲输出
             terminalOutputBuffer.value.push(outputData);
@@ -159,10 +183,19 @@ export function createSshTerminalManager(sessionId: string, wsDeps: SshTerminalD
 
         console.log(`[会话 ${sessionId}][SSH终端模块] SSH 会话已连接。 Payload:`, payload, 'Full message:', message); // 更详细的日志
         isSshConnected.value = true; // 更新状态
-        // 连接成功后聚焦终端
-        terminalInstance.value?.focus();
+        // 连接成功后聚焦终端 (仅桌面端自动聚焦，避免手机端自动弹出输入法)
+        const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        if (!isMobileDevice) {
+            terminalInstance.value?.focus();
+        }
 
         if (terminalInstance.value) {
+            // 如果之前连接过且断开后重新连上，输出一条醒目的重连成功分割线，完整保留原有历史
+            if (hasConnectedBefore.value) {
+                terminalInstance.value.writeln(`\r\n\x1b[32m--- [${getTerminalText('reconnectedMsg')}] ---\x1b[0m\r\n`);
+            }
+            hasConnectedBefore.value = true;
+
             const currentDimensions = { cols: terminalInstance.value.cols, rows: terminalInstance.value.rows };
             // 检查尺寸是否有效
             if (currentDimensions.cols > 0 && currentDimensions.rows > 0) {
@@ -172,6 +205,7 @@ export function createSshTerminalManager(sessionId: string, wsDeps: SshTerminalD
                 console.warn(`[会话 ${sessionId}][SSH终端模块] SSH 连接成功，但获取到的初始尺寸无效，跳过发送 resize:`, currentDimensions);
             }
         } else {
+             hasConnectedBefore.value = true;
              console.warn(`[会话 ${sessionId}][SSH终端模块] SSH 连接成功，但 terminalInstance 不可用，无法发送初始 resize。`);
         }
 
@@ -179,7 +213,7 @@ export function createSshTerminalManager(sessionId: string, wsDeps: SshTerminalD
         // 清空可能存在的旧缓冲（虽然理论上此时应该已经 ready 了）
         if (terminalOutputBuffer.value.length > 0) {
              console.warn(`[会话 ${sessionId}][SSH终端模块] SSH 连接时仍有缓冲数据，正在写入...`);
-             terminalOutputBuffer.value.forEach(data => terminalInstance.value?.write(data));
+             terminalOutputBuffer.value.forEach(data => terminalInstance.value?.write(highlightStore.highlight(data)));
              terminalOutputBuffer.value = [];
         }
     };
@@ -272,6 +306,10 @@ export function createSshTerminalManager(sessionId: string, wsDeps: SshTerminalD
 
     // --- 清理函数 ---
     const cleanup = () => {
+        if (terminalSyncTimer) {
+            clearTimeout(terminalSyncTimer);
+            terminalSyncTimer = null;
+        }
         unregisterAllSshHandlers();
         // terminalInstance.value?.dispose(); // 终端实例的销毁由 TerminalComponent 负责
         terminalInstance.value = null;
@@ -337,6 +375,18 @@ export function createSshTerminalManager(sessionId: string, wsDeps: SshTerminalD
         searchNext,
         searchPrevious,
         clearTerminalSearch,
+        // --- 序列化方法 (带完整 ANSI 样式) ---
+        serializeTerminal: (): string | null => {
+            if (serializeAddon.value) {
+                try {
+                    return serializeAddon.value.serialize();
+                } catch (e) {
+                    console.warn(`[会话 ${sessionId}][SSH终端模块] 序列化终端内容失败:`, e);
+                }
+            }
+            return null;
+        },
+        serializeAddon,
         // --- 暴露状态 ---
         isSshConnected: readonly(isSshConnected), // 暴露 SSH 连接状态 (只读)
         terminalInstance, // 暴露 terminal 实例，以便 WorkspaceView 可以写入提示信息

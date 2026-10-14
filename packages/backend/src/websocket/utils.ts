@@ -3,6 +3,8 @@ import { SftpService } from '../sftp/sftp.service';
 import { StatusMonitorService } from '../services/status-monitor.service';
 import { clientStates, sftpService, statusMonitorService } from './state';
 import { sshSuspendService } from '../ssh-suspend/ssh-suspend.service';
+import { temporaryLogStorageService } from '../ssh-suspend/temporary-log-storage.service';
+import { workspaceSyncService } from '../workspace-sync/workspace-sync.service';
 
 // --- 解析 Ports 字符串的辅助函数 ---
 export function parsePortsString(portsString: string | undefined | null): PortInfo[] {
@@ -80,10 +82,59 @@ export const cleanupClientConnection = async (sessionId: string | undefined) => 
         // 2. 清理 SFTP 会话 (如果存在)
         if (sftpService) sftpService.cleanupSftpSession(sessionId);
 
-        // 3. 处理 SSH 连接 (核心修改点)
+        // 3. 处理 SSH 连接 (核心防御：主动关闭或已销毁绝对不挂起)
+        if (state.isExplicitlyClosed) {
+            console.log(`WebSocket: 会话 ${sessionId} 属于显式关闭/彻底销毁，绝不自动挂起，直接释放底层 SSH 资源。`);
+            state.isMarkedForSuspend = false;
+            try {
+                state.sshShellStream?.destroy?.();
+                state.sshShellStream?.end?.();
+                state.sshClient?.destroy?.();
+                state.sshClient?.end?.();
+            } catch (closeErr) {}
+            state.sshClient = undefined as any;
+            state.sshShellStream = undefined;
+        } else if (!state.isMarkedForSuspend && state.sshClient && state.sshShellStream && state.ws.userId !== undefined) {
+            // 只要不是显式主动关闭，网络断开（包括刷新 1001、网络异常等），均保护性自动转入挂起！
+            console.log(`WebSocket: 会话 ${sessionId} 发生网络断开（非显式关闭），自动转入挂起保活模式...`);
+            state.isMarkedForSuspend = true;
+            if (!state.suspendLogPath) {
+                state.suspendLogPath = sessionId;
+            }
+
+            // 获取初始缓冲：优先使用内存中积累的真实最近输出 recentOutputBuffer
+            let initialBuffer = state.recentOutputBuffer ? state.recentOutputBuffer.join('') : '';
+
+            // 如果后端内存缓冲为空，尝试从快照终端缓冲区获取保底历史
+            if (!initialBuffer) {
+                try {
+                    const syncRecord = await workspaceSyncService.getState(state.ws.userId);
+                    if (syncRecord.state?.sessions && Array.isArray(syncRecord.state.sessions)) {
+                        const matchedSync = syncRecord.state.sessions.find(
+                            (s: any) => String(s.sessionId) === String(sessionId)
+                        );
+                        if (matchedSync && matchedSync.terminalBuffer) {
+                            initialBuffer = matchedSync.terminalBuffer.replace(/\r?\n/g, '\r\n');
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            // 写入日志文件作为初始日志（仅写入初始历史，绝不在此后随意覆盖）
+            if (initialBuffer) {
+                try {
+                    await temporaryLogStorageService.ensureLogDirectoryExists();
+                    await temporaryLogStorageService.overwriteLog(state.suspendLogPath, initialBuffer);
+                } catch (logErr) {
+                    console.warn(`[cleanupClientConnection] 写入挂起初始日志失败:`, logErr);
+                }
+            }
+        }
+
         if (state.isMarkedForSuspend && state.sshClient && state.sshShellStream && state.suspendLogPath && state.ws.userId !== undefined) {
             console.log(`WebSocket: 会话 ${sessionId} 已被标记为待挂起，尝试移交给 SshSuspendService...`);
             try {
+                const initialBufferToPass = state.recentOutputBuffer ? state.recentOutputBuffer.join('') : undefined;
                 const takeoverDetails = {
                     userId: state.ws.userId,
                     originalSessionId: sessionId, // sessionId 是原始活动会话的ID
@@ -92,6 +143,7 @@ export const cleanupClientConnection = async (sessionId: string | undefined) => 
                     connectionName: state.connectionName || '未知连接',
                     connectionId: String(state.dbConnectionId),
                     logIdentifier: state.suspendLogPath, // 这是基于 originalSessionId 的日志标识
+                    initialBuffer: initialBufferToPass,
                     customSuspendName: undefined, // 如果需要，可以从 state 或其他地方获取
                 };
                 

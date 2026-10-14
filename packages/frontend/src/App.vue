@@ -4,6 +4,7 @@ import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from './stores/auth.store';
 import { useDeviceDetection } from './composables/useDeviceDetection';
+import { useVisualViewport } from './composables/useVisualViewport';
 import { useSettingsStore } from './stores/settings.store';
 import { useAppearanceStore } from './stores/appearance.store';
 import { useLayoutStore } from './stores/layout.store';
@@ -14,11 +15,15 @@ import { storeToRefs } from 'pinia';
 import UINotificationDisplay from './components/UINotificationDisplay.vue';
 import FileEditorOverlay from './components/FileEditorOverlay.vue';
 import StyleCustomizer from './components/StyleCustomizer.vue';
+import MobileStyleCustomizerModal from './components/MobileStyleCustomizerModal.vue';
 import FocusSwitcherConfigurator from './components/FocusSwitcherConfigurator.vue';
 import RemoteDesktopModal from './components/RemoteDesktopModal.vue';
 import VncModal from './components/VncModal.vue';
 import ConfirmDialog from './components/common/ConfirmDialog.vue';
+import CloseConfirmModal from './components/desktop/CloseConfirmModal.vue';
+import FirstSyncModal from './components/desktop/FirstSyncModal.vue';
 import { useDialogStore } from './stores/dialog.store';
+import { initGlobalSyncListener } from './composables/useGlobalSyncListener';
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -65,6 +70,9 @@ const updateUnderline = async () => {
 };
 
 onMounted(() => {
+  // 启动全局实时同步长连接监听器，实现全工作区面板无感自动刷新
+  initGlobalSyncListener();
+
   // Initial position update
   // Use setTimeout to ensure styles are applied and elements have dimensions
   setTimeout(updateUnderline, 100);
@@ -85,7 +93,22 @@ onMounted(() => {
   // +++ 加载 Header 可见性状态 +++
   layoutStore.loadHeaderVisibility();
 
+  // +++ 初始化移动端视觉视口与防滚动锁定 +++
+  const { initVisualViewport } = useVisualViewport();
+  initVisualViewport();
+
+  // +++ 全局防御：防止外部拖入文件在未受控区域释放导致 WebView2 意外打开文件进行页面导航 +++
+  window.addEventListener('dragover', handleGlobalDragOver);
+  window.addEventListener('drop', handleGlobalDrop);
 });
+
+// 全局拖放防御处理函数
+const handleGlobalDragOver = (e: DragEvent) => {
+  e.preventDefault();
+};
+const handleGlobalDrop = (e: DragEvent) => {
+  e.preventDefault();
+};
 
 // +++ 监听用户认证状态，登录后初始化收藏路径 +++
 watch(isAuthenticated, (loggedIn) => {
@@ -98,6 +121,8 @@ watch(isAuthenticated, (loggedIn) => {
 onUnmounted(() => {
   window.removeEventListener('keydown', handleAltKeyDown); // +++ 移除 keydown 监听 +++
   window.removeEventListener('keyup', handleGlobalKeyUp);   // +++ 移除 keyup 监听 +++
+  window.removeEventListener('dragover', handleGlobalDragOver);
+  window.removeEventListener('drop', handleGlobalDrop);
 });
 
 
@@ -288,6 +313,7 @@ const isElementVisibleAndFocusable = (element: HTMLElement): boolean => {
             <RouterLink to="/" class="inline-flex px-3 py-2 rounded-md text-sm font-medium text-secondary hover:text-link-hover hover:bg-nav-active-bg hover:no-underline transition duration-150 ease-in-out whitespace-nowrap" active-class="text-link-active bg-nav-active-bg">{{ t('nav.dashboard') }}</RouterLink> <!-- 恢复仪表盘链接, 始终可见 -->
             <RouterLink to="/workspace" class="inline-flex px-3 py-2 rounded-md text-sm font-medium text-secondary hover:text-link-hover hover:bg-nav-active-bg hover:no-underline transition duration-150 ease-in-out whitespace-nowrap" active-class="text-link-active bg-nav-active-bg">{{ t('nav.terminal') }}</RouterLink> <!-- 保持可见 -->
             <RouterLink to="/connections" class="hidden md:inline-flex px-3 py-2 rounded-md text-sm font-medium text-secondary hover:text-link-hover hover:bg-nav-active-bg hover:no-underline transition duration-150 ease-in-out whitespace-nowrap" active-class="text-link-active bg-nav-active-bg">{{ t('nav.connections') }}</RouterLink> <!-- 连接管理链接 -->
+            <RouterLink to="/quick-commands" class="hidden md:inline-flex px-3 py-2 rounded-md text-sm font-medium text-secondary hover:text-link-hover hover:bg-nav-active-bg hover:no-underline transition duration-150 ease-in-out whitespace-nowrap" active-class="text-link-active bg-nav-active-bg">{{ t('nav.quickCommands', '快捷指令') }}</RouterLink> <!-- 快捷指令管理链接 -->
             <RouterLink to="/proxies" class="hidden md:inline-flex px-3 py-2 rounded-md text-sm font-medium text-secondary hover:text-link-hover hover:bg-nav-active-bg hover:no-underline transition duration-150 ease-in-out whitespace-nowrap" active-class="text-link-active bg-nav-active-bg">{{ t('nav.proxies') }}</RouterLink> <!-- 移动端隐藏 -->
             <RouterLink to="/notifications" class="hidden md:inline-flex px-3 py-2 rounded-md text-sm font-medium text-secondary hover:text-link-hover hover:bg-nav-active-bg hover:no-underline transition duration-150 ease-in-out whitespace-nowrap" active-class="text-link-active bg-nav-active-bg">{{ t('nav.notifications') }}</RouterLink> <!-- 移动端隐藏 -->
             <RouterLink to="/audit-logs" class="hidden md:inline-flex px-3 py-2 rounded-md text-sm font-medium text-secondary hover:text-link-hover hover:bg-nav-active-bg hover:no-underline transition duration-150 ease-in-out whitespace-nowrap" active-class="text-link-active bg-nav-active-bg">{{ t('nav.auditLogs') }}</RouterLink> <!-- 移动端隐藏 -->
@@ -295,7 +321,12 @@ const isElementVisibleAndFocusable = (element: HTMLElement): boolean => {
         </div>
         <!-- Right navigation links with Tailwind classes using theme variables -->
         <div class="flex items-center space-x-1">
-
+          <!-- GitHub Icon (Hide on mobile) -->
+          <a v-if="!isMobile" href="https://github.com/Heavrnl/nexus-terminal" target="_blank" rel="noopener noreferrer" title="Heavrnl/nexus-terminal" class="px-2 py-2 rounded-md text-lg text-icon hover:text-icon-hover hover:bg-nav-active-bg hover:no-underline transition duration-150 ease-in-out">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8"/>
+            </svg>
+          </a>
           <!-- PWA Install Button - REMOVED FROM HERE -->
           <a href="#" @click.prevent="openStyleCustomizer" :title="t('nav.customizeStyle')" class="px-2 py-2 rounded-md text-lg text-icon hover:text-icon-hover hover:bg-nav-active-bg hover:no-underline transition duration-150 ease-in-out"><i class="fas fa-paint-brush"></i></a>
           <RouterLink v-if="!isAuthenticated" to="/login" class="px-3 py-2 rounded-md text-sm font-medium text-secondary hover:text-link-hover hover:bg-nav-active-bg hover:no-underline transition duration-150 ease-in-out whitespace-nowrap">{{ t('nav.login') }}</RouterLink>
@@ -306,10 +337,10 @@ const isElementVisibleAndFocusable = (element: HTMLElement): boolean => {
       </nav>
     </header>
 
-    <main>
+    <main :class="{ 'overflow-hidden': isWorkspaceRoute, 'overflow-y-auto': !isWorkspaceRoute }">
       <!-- 使用 KeepAlive 包裹 RouterView，并指定缓存 WorkspaceView -->
       <RouterView v-slot="{ Component }">
-        <KeepAlive :include="['WorkspaceView', 'ConnectionsView']">
+        <KeepAlive :include="['WorkspaceView', 'ConnectionsView', 'QuickCommandsManagementView']">
           <component :is="Component" />
         </KeepAlive>
       </RouterView>
@@ -318,11 +349,18 @@ const isElementVisibleAndFocusable = (element: HTMLElement): boolean => {
     <!-- 添加全局通知显示 -->
     <UINotificationDisplay />
 
-    <!-- 根据设置条件渲染全局文件编辑器弹窗 -->
-    <FileEditorOverlay v-if="showPopupFileEditorBoolean" :is-mobile="isMobile" />
+    <!-- 根据设置条件或移动端环境渲染全局文件编辑器弹窗 -->
+    <FileEditorOverlay v-if="showPopupFileEditorBoolean || isMobile" :is-mobile="isMobile" />
 
-    <!-- 条件渲染样式自定义器，使用 store 的状态和方法 -->
-    <StyleCustomizer v-if="isStyleCustomizerVisible" @close="closeStyleCustomizer" />
+    <!-- 条件渲染样式自定义器：移动端与桌面端完全解耦渲染 -->
+    <MobileStyleCustomizerModal
+      v-if="isStyleCustomizerVisible && isMobile"
+      @close="closeStyleCustomizer"
+    />
+    <StyleCustomizer
+      v-else-if="isStyleCustomizerVisible && !isMobile"
+      @close="closeStyleCustomizer"
+    />
 
     <!-- +++ 条件渲染焦点切换配置器 (使用 v-show 保持实例) +++ -->
     <FocusSwitcherConfigurator
@@ -358,6 +396,12 @@ const isElementVisibleAndFocusable = (element: HTMLElement): boolean => {
           @update:visible="(val: boolean) => dialogStore.state.visible = val"
         />
 
+    <!-- +++ 桌面客户端关闭主窗口确认模态框 +++ -->
+    <CloseConfirmModal />
+
+    <!-- +++ 桌面客户端初次同步数据对齐向导模态框 +++ -->
+    <FirstSyncModal />
+
   </div>
 </template>
 
@@ -365,14 +409,20 @@ const isElementVisibleAndFocusable = (element: HTMLElement): boolean => {
 #app-container {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  font-family: var(--font-family-sans-serif); /* 使用字体变量 */
+  width: 100%;
+  height: 100%;
+  height: var(--visual-viewport-height, 100dvh);
+  max-height: var(--visual-viewport-height, 100dvh);
+  overflow: hidden;
+  font-family: var(--font-family-sans-serif);
+  background-color: var(--app-bg-color);
 }
-
 
 main {
-  flex-grow: 1;
-
+  flex: 1 1 0%;
+  min-height: 0;
+  width: 100%;
+  position: relative;
+  background-color: var(--app-bg-color);
 }
-
 </style>

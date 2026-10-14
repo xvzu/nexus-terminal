@@ -25,6 +25,11 @@ export interface ClientState { // 导出以便 Service 可以导入
     isSuspendedByService?: boolean; // 标记此会话是否已被 SshSuspendService 接管
     isMarkedForSuspend?: boolean; // 标记此会话是否已被用户请求挂起（等待断开连接）
     suspendLogPath?: string;      // 如果标记挂起，则存储日志路径 (基于原始 sessionId)
+    pendingDimensions?: { cols: number; rows: number }; // 暂存 Shell 就绪前收到的终端尺寸
+    isExplicitlyClosed?: boolean; // 标记是否被客户端主动显式关闭（杜绝转入自动挂起）
+    closeReason?: string;
+    recentOutputBuffer?: string[]; // 内存中维护的最近终端输出缓冲（环形保留，避免断线/刷新丢失未同步数据）
+    recentOutputBytes?: number;    // 缓冲累计字节数
     // suspendLogWritableStream?: NodeJS.WritableStream; // 移除，将直接使用 temporaryLogStorageService.writeToLog
 }
 

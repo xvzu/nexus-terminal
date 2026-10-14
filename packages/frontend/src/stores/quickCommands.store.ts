@@ -17,6 +17,7 @@ export interface QuickCommandFE { // Renamed from QuickCommand if necessary
     updated_at: number;
     tagIds: number[]; // +++ Add tagIds +++
     variables?: Record<string, string>; // New: Add variables
+    background_color?: string | null; // 快捷指令自定义背景色
 }
 
 // 定义排序类型
@@ -242,62 +243,73 @@ export const useQuickCommandsStore = defineStore('quickCommands', () => {
     };
 
     // 从后端获取快捷指令 (包含 tagIds，不再发送 sortBy)
-    const fetchQuickCommands = async () => {
+    const fetchQuickCommands = async (force: boolean = false) => {
         // 简化缓存：只缓存原始列表，不再区分排序
         const cacheKey = 'quickCommandsListCache';
         error.value = null;
 
-        // 1. 尝试从 localStorage 加载缓存
-        try {
-            const cachedData = localStorage.getItem(cacheKey);
-            if (cachedData) {
-                // 确保解析后的数据符合 QuickCommandFE 结构 (特别是 tagIds 和 variables)
-                const parsedData = JSON.parse(cachedData) as QuickCommandFE[];
-                // 基本验证，确保 tagIds 是数组，variables 是对象或undefined
-                if (Array.isArray(parsedData) && parsedData.every(item => Array.isArray(item.tagIds) && (item.variables === undefined || typeof item.variables === 'object'))) {
-                    quickCommandsList.value = parsedData;
-                    isLoading.value = false;
+        // 辅助函数：安全更新本地缓存
+        const saveToCache = (list: QuickCommandFE[]) => {
+            try {
+                localStorage.setItem(cacheKey, JSON.stringify(list));
+            } catch (e) {
+                console.warn('[QuickCmdStore] 写入快捷指令缓存失败:', e);
+            }
+        };
+
+        // 1. 若非强制刷新，尝试从 localStorage 加载缓存
+        if (!force) {
+            try {
+                const cachedData = localStorage.getItem(cacheKey);
+                if (cachedData) {
+                    const parsedData = JSON.parse(cachedData) as QuickCommandFE[];
+                    if (Array.isArray(parsedData)) {
+                        quickCommandsList.value = parsedData;
+                        isLoading.value = false;
+                    }
                 } else {
-                     console.warn('[QuickCmdStore] Cached data format invalid, ignoring cache.');
-                     localStorage.removeItem(cacheKey);
-                     isLoading.value = true;
+                    isLoading.value = true;
                 }
-            } else {
+            } catch (e) {
+                console.error('[QuickCmdStore] Failed to load or parse commands cache:', e);
+                localStorage.removeItem(cacheKey);
                 isLoading.value = true;
             }
-        } catch (e) {
-            console.error('[QuickCmdStore] Failed to load or parse commands cache:', e);
-            localStorage.removeItem(cacheKey);
-            isLoading.value = true;
         }
 
         // 2. 后台获取最新数据
-        isLoading.value = true;
         try {
-            console.log(`[QuickCmdStore] Fetching latest commands from server...`);
-            // 不再发送 sortBy 参数
             const response = await apiClient.get<QuickCommandFE[]>('/quick-commands');
-            // 确保返回的数据包含 tagIds 数组和 variables 对象
             const freshData = response.data.map(cmd => ({
                 ...cmd,
-                tagIds: Array.isArray(cmd.tagIds) ? cmd.tagIds : [], // 确保 tagIds 是数组
-                variables: typeof cmd.variables === 'object' ? cmd.variables : undefined // 确保 variables 是对象或 undefined
+                tagIds: Array.isArray(cmd.tagIds) ? cmd.tagIds : [],
+                variables: typeof cmd.variables === 'object' ? cmd.variables : undefined,
+                background_color: cmd.background_color || null
             }));
-            const freshDataString = JSON.stringify(freshData);
 
-            // 3. 对比并更新
-            const currentDataString = JSON.stringify(quickCommandsList.value);
-            if (currentDataString !== freshDataString) {
-                console.log('[QuickCmdStore] Commands data changed, updating state and cache.');
+            if (force) {
                 quickCommandsList.value = freshData;
-                localStorage.setItem(cacheKey, freshDataString); // 更新缓存
+                saveToCache(freshData);
             } else {
+                const current = quickCommandsList.value;
+                const hasChanged = current.length !== freshData.length ||
+                    (freshData.length > 0 && current.length > 0 && (
+                        current[0]?.id !== freshData[0]?.id ||
+                        current[0]?.updated_at !== freshData[0]?.updated_at ||
+                        current[current.length - 1]?.id !== freshData[freshData.length - 1]?.id ||
+                        JSON.stringify(current) !== JSON.stringify(freshData)
+                    )) || (current.length === 0 && freshData.length > 0);
+
+                if (hasChanged) {
+                    quickCommandsList.value = freshData;
+                    saveToCache(freshData);
+                }
             }
             error.value = null;
         } catch (err: any) {
             console.error('[QuickCmdStore] 获取快捷指令失败:', err);
             error.value = err.response?.data?.message || '获取快捷指令时发生错误';
-            if (error.value) {
+            if (quickCommandsList.value.length === 0 && error.value) {
                 uiNotificationsStore.showError(error.value);
             }
         } finally {
@@ -308,17 +320,36 @@ export const useQuickCommandsStore = defineStore('quickCommands', () => {
     // 清除快捷指令列表缓存
     const clearQuickCommandsCache = () => {
         localStorage.removeItem('quickCommandsListCache');
-        console.log('[QuickCmdStore] Cleared quick commands list cache.');
     };
 
-
-    const addQuickCommand = async (name: string | null, command: string, tagIds?: number[], variables?: Record<string, string>): Promise<boolean> => {
+    // 添加快捷指令 (原地追加，避免全量重新请求)
+    const addQuickCommand = async (
+        name: string | null,
+        command: string,
+        tagIds?: number[],
+        variables?: Record<string, string>,
+        backgroundColor?: string | null
+    ): Promise<boolean> => {
         try {
-            const response = await apiClient.post<{ message: string, command: QuickCommandFE }>('/quick-commands', { name, command, tagIds, variables });
-            if (response.data.command) {
-                quickCommandsList.value.unshift(response.data.command);
+            const response = await apiClient.post<{ message: string, command: QuickCommandFE }>('/quick-commands', {
+                name,
+                command,
+                tagIds,
+                variables,
+                background_color: backgroundColor || null
+            });
+            if (response.data?.command) {
+                const newCmd: QuickCommandFE = {
+                    ...response.data.command,
+                    tagIds: Array.isArray(response.data.command.tagIds) ? response.data.command.tagIds : (tagIds || []),
+                    variables: response.data.command.variables || variables,
+                    background_color: response.data.command.background_color || backgroundColor || null
+                };
+                quickCommandsList.value.push(newCmd);
+                try {
+                    localStorage.setItem('quickCommandsListCache', JSON.stringify(quickCommandsList.value));
+                } catch (e) {}
             }
-            try { localStorage.setItem('quickCommandsListCache', JSON.stringify(quickCommandsList.value)); } catch {}
             uiNotificationsStore.showSuccess('快捷指令已添加');
             return true;
         } catch (err: any) {
@@ -329,14 +360,37 @@ export const useQuickCommandsStore = defineStore('quickCommands', () => {
         }
     };
 
-    const updateQuickCommand = async (id: number, name: string | null, command: string, tagIds?: number[], variables?: Record<string, string>): Promise<boolean> => {
+    // 更新快捷指令 (原地替换，避免全量重新请求)
+    const updateQuickCommand = async (
+        id: number,
+        name: string | null,
+        command: string,
+        tagIds?: number[],
+        variables?: Record<string, string>,
+        backgroundColor?: string | null
+    ): Promise<boolean> => {
          try {
-            const response = await apiClient.put<{ message: string, command: QuickCommandFE }>(`/quick-commands/${id}`, { name, command, tagIds, variables });
-            const index = quickCommandsList.value.findIndex(c => c.id === id);
-            if (index !== -1 && response.data.command) {
-                quickCommandsList.value[index] = response.data.command;
+            const payload: Record<string, any> = { name, command, tagIds, variables };
+            if (typeof backgroundColor !== 'undefined') {
+                payload.background_color = backgroundColor;
             }
-            try { localStorage.setItem('quickCommandsListCache', JSON.stringify(quickCommandsList.value)); } catch {}
+
+            const response = await apiClient.put<{ message: string, command: QuickCommandFE }>(`/quick-commands/${id}`, payload);
+            const index = quickCommandsList.value.findIndex(cmd => cmd.id === id);
+            if (index !== -1 && response.data?.command) {
+                quickCommandsList.value[index] = {
+                    ...quickCommandsList.value[index],
+                    ...response.data.command,
+                    tagIds: Array.isArray(response.data.command.tagIds) ? response.data.command.tagIds : (tagIds || []),
+                    variables: response.data.command.variables || variables,
+                    background_color: typeof response.data.command.background_color !== 'undefined'
+                        ? response.data.command.background_color
+                        : (typeof backgroundColor !== 'undefined' ? backgroundColor : quickCommandsList.value[index].background_color)
+                };
+                try {
+                    localStorage.setItem('quickCommandsListCache', JSON.stringify(quickCommandsList.value));
+                } catch (e) {}
+            }
             uiNotificationsStore.showSuccess('快捷指令已更新');
             return true;
         } catch (err: any) {
@@ -347,15 +401,20 @@ export const useQuickCommandsStore = defineStore('quickCommands', () => {
         }
     };
 
-    // 删除快捷指令
+    // 删除快捷指令 (本地优先响应)
     const deleteQuickCommand = async (id: number) => {
+        // 1. 本地立即移除
+        const index = quickCommandsList.value.findIndex(cmd => cmd.id === id);
+        if (index !== -1) {
+            quickCommandsList.value.splice(index, 1);
+            try {
+                localStorage.setItem('quickCommandsListCache', JSON.stringify(quickCommandsList.value));
+            } catch (e) {}
+        }
+
+        // 2. 异步同步后端
         try {
             await apiClient.delete(`/quick-commands/${id}`);
-            const index = quickCommandsList.value.findIndex(cmd => cmd.id === id);
-            if (index !== -1) {
-                quickCommandsList.value.splice(index, 1);
-            }
-            try { localStorage.setItem('quickCommandsListCache', JSON.stringify(quickCommandsList.value)); } catch {}
             uiNotificationsStore.showSuccess('快捷指令已删除');
         } catch (err: any) {
             console.error('删除快捷指令失败:', err);
@@ -364,25 +423,20 @@ export const useQuickCommandsStore = defineStore('quickCommands', () => {
         }
     };
 
-    // 增加使用次数 (调用 API，然后更新本地数据)
+    // 增加使用次数 (本地响应式自增，彻底消除全量重拉，静默上报后台)
     const incrementUsage = async (id: number) => {
-         try {
-            await apiClient.post(`/quick-commands/${id}/increment-usage`); // 使用 apiClient
-            // 更新本地计数，避免重新请求整个列表
-            const command = quickCommandsList.value.find(cmd => cmd.id === id);
-            if (command) {
-                command.usage_count += 1;
-                // 如果当前是按使用次数排序，可能需要重新排序或刷新列表
-                if (sortBy.value === 'usage_count') {
-                    // 清除所有排序缓存并重新获取当前排序
-                    clearQuickCommandsCache();
-                    await fetchQuickCommands();
-                }
-            }
-        } catch (err: any) {
-            console.error('增加使用次数失败:', err);
-            // 这里可以选择不提示用户错误，因为这是一个后台操作
+        const command = quickCommandsList.value.find(cmd => cmd.id === id);
+        if (command) {
+            command.usage_count += 1;
+            command.updated_at = Math.floor(Date.now() / 1000);
+            try {
+                localStorage.setItem('quickCommandsListCache', JSON.stringify(quickCommandsList.value));
+            } catch (e) {}
         }
+        // 静默异步上报后台，无额外等待与网络抖动
+        apiClient.post(`/quick-commands/${id}/increment-usage`).catch(err => {
+            console.warn('[QuickCmdStore] 增加使用次数同步失败:', err?.message || err);
+        });
     };
 
     // 设置搜索词
@@ -405,7 +459,13 @@ export const useQuickCommandsStore = defineStore('quickCommands', () => {
         selectedIndex.value = -1;
     };
 
-    // Removed duplicate resetSelection definition
+    // 移动快捷指令到指定文件夹 (folderId 为 null 表示未分类)
+    const moveCommandToFolder = async (id: number, folderId: number | null): Promise<boolean> => {
+        const cmd = quickCommandsList.value.find(c => c.id === id);
+        if (!cmd) return false;
+        const targetTagIds = folderId !== null ? [folderId] : [];
+        return updateQuickCommand(cmd.id, cmd.name, cmd.command, targetTagIds, cmd.variables, cmd.background_color);
+    };
 
     return {
         quickCommandsList,
@@ -421,6 +481,7 @@ export const useQuickCommandsStore = defineStore('quickCommands', () => {
         addQuickCommand,
         updateQuickCommand,
         deleteQuickCommand,
+        moveCommandToFolder,
         incrementUsage,
         setSearchTerm,
         setSortBy,

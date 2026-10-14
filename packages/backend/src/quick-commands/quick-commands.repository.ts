@@ -7,6 +7,7 @@ export interface QuickCommand {
     command: string;
     usage_count: number;
     variables?: string; // 存储 JSON 格式的变量键值对
+    background_color?: string | null;
     created_at: number; // Unix 时间戳 (秒)
     updated_at: number; // Unix 时间戳 (秒)
 }
@@ -29,14 +30,15 @@ interface DbQuickCommandWithTagsRow extends QuickCommand {
  * @param name - 指令名称 (可选)
  * @param command - 指令内容
  * @param variables - 变量对象 (可选)
+ * @param backgroundColor - 背景颜色 (可选)
  * @returns 返回插入记录的 ID
  */
-export const addQuickCommand = async (name: string | null, command: string, variables?: Record<string, string>): Promise<number> => {
-    const sql = `INSERT INTO quick_commands (name, command, variables, created_at, updated_at) VALUES (?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now'))`;
+export const addQuickCommand = async (name: string | null, command: string, variables?: Record<string, string>, backgroundColor?: string | null): Promise<number> => {
+    const sql = `INSERT INTO quick_commands (name, command, variables, background_color, created_at, updated_at) VALUES (?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now'))`;
     try {
         const db = await getDbInstance();
         const variablesJson = variables ? JSON.stringify(variables) : null;
-        const result = await runDb(db, sql, [name, command, variablesJson]);
+        const result = await runDb(db, sql, [name, command, variablesJson, backgroundColor || null]);
         if (typeof result.lastID !== 'number' || result.lastID <= 0) {
              throw new Error('添加快捷指令后未能获取有效的 lastID');
         }
@@ -53,14 +55,23 @@ export const addQuickCommand = async (name: string | null, command: string, vari
  * @param name - 新的指令名称 (可选)
  * @param command - 新的指令内容
  * @param variables - 新的变量对象 (可选)
+ * @param backgroundColor - 新的背景颜色 (可选)
  * @returns 返回是否成功更新 (true/false)
  */
-export const updateQuickCommand = async (id: number, name: string | null, command: string, variables?: Record<string, string>): Promise<boolean> => {
-    const sql = `UPDATE quick_commands SET name = ?, command = ?, variables = ?, updated_at = strftime('%s', 'now') WHERE id = ?`;
+export const updateQuickCommand = async (id: number, name: string | null, command: string, variables?: Record<string, string>, backgroundColor?: string | null): Promise<boolean> => {
+    const variablesJson = variables ? JSON.stringify(variables) : null;
+    let sql: string;
+    let params: any[];
+    if (typeof backgroundColor !== 'undefined') {
+        sql = `UPDATE quick_commands SET name = ?, command = ?, variables = ?, background_color = ?, updated_at = strftime('%s', 'now') WHERE id = ?`;
+        params = [name, command, variablesJson, backgroundColor || null, id];
+    } else {
+        sql = `UPDATE quick_commands SET name = ?, command = ?, variables = ?, updated_at = strftime('%s', 'now') WHERE id = ?`;
+        params = [name, command, variablesJson, id];
+    }
     try {
         const db = await getDbInstance();
-        const variablesJson = variables ? JSON.stringify(variables) : null;
-        const result = await runDb(db, sql, [name, command, variablesJson, id]);
+        const result = await runDb(db, sql, params);
         return result.changes > 0;
     } catch (err: any) {
         console.error('更新快捷指令时出错:', err.message);
@@ -95,13 +106,14 @@ export const getAllQuickCommands = async (sortBy: 'name' | 'usage_count' = 'name
     if (sortBy === 'usage_count') {
         orderByClause = 'ORDER BY qc.usage_count DESC, qc.name ASC'; // 按使用频率降序，同频率按名称升序
     }
-    // 使用 LEFT JOIN 连接关联表，并使用 GROUP_CONCAT 获取标签 ID 字符串
+    // 使用 LEFT JOIN 连接关联表与标签表，确保只提取真实存在的有效标签 ID
     const sql = `
         SELECT
-            qc.id, qc.name, qc.command, qc.usage_count, qc.variables, qc.created_at, qc.updated_at,
-            GROUP_CONCAT(qta.tag_id) as tag_ids_str
+            qc.id, qc.name, qc.command, qc.usage_count, qc.variables, qc.background_color, qc.created_at, qc.updated_at,
+            GROUP_CONCAT(qt.id) as tag_ids_str
          FROM quick_commands qc
          LEFT JOIN quick_command_tag_associations qta ON qc.id = qta.quick_command_id
+         LEFT JOIN quick_command_tags qt ON qta.tag_id = qt.id
          GROUP BY qc.id
          ${orderByClause}`;
     try {
@@ -154,13 +166,14 @@ export const incrementUsageCount = async (id: number): Promise<boolean> => {
  * @returns 返回找到的快捷指令条目及标签 ID，如果未找到则返回 undefined
  */
 export const findQuickCommandById = async (id: number): Promise<QuickCommandWithTags | undefined> => {
-    // 使用 LEFT JOIN 连接关联表，并使用 GROUP_CONCAT 获取标签 ID 字符串
+    // 使用 LEFT JOIN 连接关联表与标签表，确保只提取真实存在的有效标签 ID
     const sql = `
         SELECT
-            qc.id, qc.name, qc.command, qc.usage_count, qc.variables, qc.created_at, qc.updated_at,
-            GROUP_CONCAT(qta.tag_id) as tag_ids_str
+            qc.id, qc.name, qc.command, qc.usage_count, qc.variables, qc.background_color, qc.created_at, qc.updated_at,
+            GROUP_CONCAT(qt.id) as tag_ids_str
          FROM quick_commands qc
          LEFT JOIN quick_command_tag_associations qta ON qc.id = qta.quick_command_id
+         LEFT JOIN quick_command_tags qt ON qta.tag_id = qt.id
          WHERE qc.id = ?
          GROUP BY qc.id`;
     try {

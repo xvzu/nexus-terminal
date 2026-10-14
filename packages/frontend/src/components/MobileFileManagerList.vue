@@ -1,0 +1,709 @@
+<script setup lang="ts">
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { useI18n } from 'vue-i18n';
+import type { FileListItem } from '../types/sftp.types';
+import { getFileIconClass } from '../utils/fileIcons';
+import { formatFileSize, formatFileMode, formatFileDate } from '../utils/fileFormatters';
+import { useSessionStore } from '../stores/session.store';
+import { useFileColorHighlightsStore } from '../stores/fileColorHighlights.store';
+
+const props = withDefaults(
+  defineProps<{
+    items: FileListItem[];
+    isLoading: boolean;
+    hasParentLink: boolean;
+    currentPath: string;
+    searchQuery: string;
+    selectedItems: Set<string>;
+    isMultiSelectMode: boolean;
+    isConnected: boolean;
+    hasClipboardContent?: boolean;
+    clipboardOperation?: 'copy' | 'cut' | null;
+    clipboardCount?: number;
+    clipboardSourceBaseDir?: string;
+    isCompact?: boolean;
+    doubleClickToOpen?: boolean;
+  }>(),
+  {
+    isCompact: true,
+    doubleClickToOpen: false,
+    hasClipboardContent: false,
+    clipboardOperation: null,
+    clipboardCount: 0,
+    clipboardSourceBaseDir: '',
+  }
+);
+
+const emit = defineEmits<{
+  (e: 'open-parent'): void;
+  (e: 'item-click', item: FileListItem): void;
+  (e: 'toggle-select', item: FileListItem): void;
+  (e: 'open-action-sheet', item: FileListItem): void;
+  (e: 'select-all'): void;
+  (e: 'deselect-all'): void;
+  (e: 'batch-download'): void;
+  (e: 'batch-copy'): void;
+  (e: 'batch-cut'): void;
+  (e: 'batch-paste'): void;
+  (e: 'batch-delete'): void;
+  (e: 'exit-multi-select'): void;
+  (e: 'cancel-clipboard'): void;
+}>();
+
+const { t } = useI18n();
+const sessionStore = useSessionStore();
+const fileColorHighlightsStore = useFileColorHighlightsStore();
+
+const connectionId = computed(() => {
+  const activeConnId = sessionStore.activeSession?.connectionId;
+  if (activeConnId) {
+    const parsed = parseInt(activeConnId, 10);
+    return isNaN(parsed) ? null : parsed;
+  }
+  return null;
+});
+
+const getItemHighlightColor = (item: FileListItem): string | undefined => {
+  if (!connectionId.value) return undefined;
+  const base = props.currentPath.endsWith('/') ? props.currentPath : `${props.currentPath}/`;
+  const fullPath = `${base}${item.filename}`;
+  return fileColorHighlightsStore.getColor(connectionId.value, fullPath);
+};
+
+// 容器引用与滚动状态
+const containerRef = ref<HTMLDivElement | null>(null);
+const scrollTop = ref(0);
+const containerHeight = ref(500);
+
+// 单行卡片基准高度 (px)：紧凑模式 42px，详细模式 58px
+const CARD_HEIGHT = computed(() => (props.isCompact ? 42 : 58));
+const BUFFER_SIZE = 8;
+
+// 正在进入的目标文件夹或上级目录（用于即时显示加载动画）
+const navigatingFolderName = ref<string | null>(null);
+const isNavigatingParent = ref(false);
+
+// 列表入场动画触发键（在路径变更或数据加载完成时递增）
+const listAnimationKey = ref(0);
+
+// 控制新目录卡片交错入场动画的激活窗口（仅在进入新目录首屏 600ms 内启用，保证后续滚动性能）
+const isEnteringNewDirectory = ref(false);
+let enterAnimationTimer: ReturnType<typeof setTimeout> | null = null;
+
+const triggerEnterAnimation = () => {
+  isEnteringNewDirectory.value = true;
+  if (enterAnimationTimer) clearTimeout(enterAnimationTimer);
+  enterAnimationTimer = setTimeout(() => {
+    isEnteringNewDirectory.value = false;
+  }, 600);
+};
+
+// 监听路径变动：重置滚动条至最顶部，并清除单项加载状态
+watch(
+  () => props.currentPath,
+  () => {
+    navigatingFolderName.value = null;
+    isNavigatingParent.value = false;
+    scrollTop.value = 0;
+    listAnimationKey.value++;
+    triggerEnterAnimation();
+    nextTick(() => {
+      if (containerRef.value) {
+        containerRef.value.scrollTop = 0;
+      }
+    });
+  }
+);
+
+// 监听全局加载结束：清除单项加载指示，并在数据加载完成后触发列表动效
+watch(
+  () => props.isLoading,
+  (loading, oldLoading) => {
+    if (!loading) {
+      navigatingFolderName.value = null;
+      isNavigatingParent.value = false;
+      if (oldLoading) {
+        listAnimationKey.value++;
+        triggerEnterAnimation();
+      }
+    }
+  }
+);
+
+const updateContainerDimensions = () => {
+  if (containerRef.value) {
+    containerHeight.value = containerRef.value.clientHeight || 500;
+  }
+};
+
+const handleScroll = (event: Event) => {
+  const target = event.target as HTMLElement;
+  if (target) {
+    scrollTop.value = target.scrollTop;
+  }
+};
+
+let resizeObserver: ResizeObserver | null = null;
+onMounted(() => {
+  updateContainerDimensions();
+  if (containerRef.value) {
+    resizeObserver = new ResizeObserver(() => {
+      updateContainerDimensions();
+    });
+    resizeObserver.observe(containerRef.value);
+  }
+});
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+  if (enterAnimationTimer) {
+    clearTimeout(enterAnimationTimer);
+    enterAnimationTimer = null;
+  }
+});
+
+// 计算虚拟滚动切片
+const totalItemsCount = computed(() => props.items.length);
+const shouldUseVirtualScroll = computed(() => totalItemsCount.value > 50);
+
+const virtualRange = computed(() => {
+  const itemHeight = CARD_HEIGHT.value;
+  if (!shouldUseVirtualScroll.value) {
+    return {
+      start: 0,
+      end: totalItemsCount.value,
+      topPadding: 0,
+      bottomPadding: 0,
+      visibleList: props.items.map((item, index) => ({ item, index })),
+    };
+  }
+
+  const effectiveScrollTop = Math.max(0, scrollTop.value);
+  const rawStart = Math.floor(effectiveScrollTop / itemHeight) - BUFFER_SIZE;
+  const start = Math.max(0, rawStart);
+  const visibleCount = Math.ceil(containerHeight.value / itemHeight);
+  const rawEnd = Math.floor(effectiveScrollTop / itemHeight) + visibleCount + BUFFER_SIZE;
+  const end = Math.min(totalItemsCount.value, rawEnd);
+
+  const topPadding = start * itemHeight;
+  const bottomPadding = Math.max(0, (totalItemsCount.value - end) * itemHeight);
+
+  const visibleList: Array<{ item: FileListItem; index: number }> = [];
+  for (let i = start; i < end; i++) {
+    if (props.items[i]) {
+      visibleList.push({ item: props.items[i], index: i });
+    }
+  }
+
+  return { start, end, topPadding, bottomPadding, visibleList };
+});
+
+// --- 触屏长按判定逻辑 (350ms) ---
+let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+let touchStartX = 0;
+let touchStartY = 0;
+let isLongPressTriggered = false;
+
+const handleTouchStart = (item: FileListItem, event: TouchEvent) => {
+  if (props.isMultiSelectMode) return;
+  const touch = event.touches[0];
+  touchStartX = touch.clientX;
+  touchStartY = touch.clientY;
+  isLongPressTriggered = false;
+
+  if (longPressTimer) clearTimeout(longPressTimer);
+  longPressTimer = setTimeout(() => {
+    isLongPressTriggered = true;
+    if (navigator.vibrate) {
+      navigator.vibrate(40);
+    }
+    emit('open-action-sheet', item);
+  }, 350);
+};
+
+const handleTouchMove = (event: TouchEvent) => {
+  if (!longPressTimer) return;
+  const touch = event.touches[0];
+  const deltaX = Math.abs(touch.clientX - touchStartX);
+  const deltaY = Math.abs(touch.clientY - touchStartY);
+  // 滑动超过 10px 视为滚动列表，取消长按
+  if (deltaX > 10 || deltaY > 10) {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+};
+
+const handleTouchEnd = () => {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+};
+
+let lastParentTapTime = 0;
+const handleOpenParent = () => {
+  if (props.isLoading) return;
+  if (props.doubleClickToOpen) {
+    const now = Date.now();
+    const isDoubleTap = now - lastParentTapTime < 350;
+    lastParentTapTime = now;
+    if (!isDoubleTap) {
+      return;
+    }
+    lastParentTapTime = 0;
+  }
+  isNavigatingParent.value = true;
+  emit('open-parent');
+};
+
+let lastItemTapTime = 0;
+let lastItemTapFilename = '';
+
+// 点击条目
+const handleRowClick = (item: FileListItem) => {
+  if (isLongPressTriggered) {
+    isLongPressTriggered = false;
+    return;
+  }
+
+  if (props.isMultiSelectMode) {
+    // 多选模式下：文件夹点击主体直接进入该目录，需要选择文件夹时轻触左侧复选框
+    if (item.attrs.isDirectory) {
+      navigatingFolderName.value = item.filename;
+      emit('item-click', item);
+      return;
+    }
+    // 普通文件点击主体即切换选择状态
+    emit('toggle-select', item);
+    return;
+  }
+
+  // 开启双击打开模式时的判定逻辑
+  if (props.doubleClickToOpen) {
+    const now = Date.now();
+    const isDoubleTap = now - lastItemTapTime < 350 && lastItemTapFilename === item.filename;
+    lastItemTapTime = now;
+    lastItemTapFilename = item.filename;
+
+    if (!isDoubleTap) {
+      // 单击：切换选中/高亮该项
+      emit('toggle-select', item);
+      return;
+    }
+
+    // 双击：执行进入或打开动作并重置双击判定
+    lastItemTapTime = 0;
+    lastItemTapFilename = '';
+    if (item.attrs.isDirectory) {
+      navigatingFolderName.value = item.filename;
+    }
+    emit('item-click', item);
+    return;
+  }
+
+  // 常规模式下（默认单击即打开）：如果是文件夹，设置加载态
+  if (item.attrs.isDirectory) {
+    navigatingFolderName.value = item.filename;
+  }
+  emit('item-click', item);
+};
+
+// 点击更多按钮 (三点菜单)
+const handleMoreClick = (item: FileListItem, event: MouseEvent) => {
+  event.stopPropagation();
+  emit('open-action-sheet', item);
+};
+
+// 是否全选状态
+const isAllSelected = computed(() => {
+  if (props.items.length === 0) return false;
+  return props.items.every(item => props.selectedItems.has(item.filename));
+});
+
+const handleToggleSelectAll = () => {
+  if (isAllSelected.value) {
+    emit('deselect-all');
+  } else {
+    emit('select-all');
+  }
+};
+</script>
+
+<template>
+  <div class="relative flex flex-col h-full min-h-0 bg-background select-none overflow-hidden">
+    <!-- 移动端文件卡片滚动列表容器 -->
+    <div
+      ref="containerRef"
+      class="flex-grow min-h-0 overflow-y-auto overscroll-contain px-2.5 py-2 space-y-1.5 [scrollbar-width:thin] pb-24"
+      @scroll="handleScroll"
+    >
+      <!-- 常驻置顶：返回上一级目录卡片 (永远在首位，不受加载影响) -->
+      <div
+        v-if="hasParentLink"
+        class="w-full flex items-center border border-border/40 transition-colors cursor-pointer shrink-0"
+        :class="[
+          isCompact
+            ? 'gap-2.5 px-3 py-1.5 rounded-lg bg-header/40 hover:bg-header/80 active:bg-primary/10'
+            : 'gap-3 px-3.5 py-2.5 rounded-xl bg-header/40 hover:bg-header/80 active:bg-primary/10',
+          { 'ring-1 ring-primary/40 bg-primary/10 opacity-80': isNavigatingParent }
+        ]"
+        @click="handleOpenParent"
+      >
+        <div
+          class="rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0"
+          :class="isCompact ? 'w-7.5 h-7.5' : 'w-9 h-9'"
+        >
+          <i
+            v-if="!isNavigatingParent"
+            class="fas fa-level-up-alt text-primary"
+            :class="isCompact ? 'text-sm' : 'text-base'"
+          ></i>
+          <i
+            v-else
+            class="fas fa-circle-notch fa-spin text-primary"
+            :class="isCompact ? 'text-xs' : 'text-sm'"
+          ></i>
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="text-[13px] font-medium text-foreground tracking-tight leading-tight">
+            {{ t('fileManager.parentDirectory', '返回上一级') }}
+          </div>
+          <div v-if="!isCompact" class="text-[11px] text-text-secondary font-mono">..</div>
+        </div>
+        <div class="text-text-secondary/50 text-xs">
+          <i v-if="!isNavigatingParent" class="fas fa-chevron-up"></i>
+          <i v-else class="fas fa-spinner fa-spin text-primary"></i>
+        </div>
+      </div>
+
+      <!-- 加载中骨架遮罩 (位于返回上一级下方) -->
+      <div v-if="isLoading && items.length === 0" class="py-12 flex flex-col items-center justify-center gap-3 text-text-secondary">
+        <i class="fas fa-spinner fa-spin text-2xl text-primary"></i>
+        <span class="text-xs">{{ t('fileManager.loading', '正在加载文件列表...') }}</span>
+      </div>
+
+      <!-- 空目录或无搜索结果 -->
+      <div
+        v-if="!isLoading && items.length === 0"
+        :key="`empty-${listAnimationKey}`"
+        class="py-16 flex flex-col items-center justify-center gap-2.5 text-text-secondary mobile-file-list-enter"
+      >
+        <div class="w-14 h-14 rounded-2xl bg-header/40 border border-border/50 flex items-center justify-center text-text-secondary/60 text-2xl">
+          <i :class="searchQuery ? 'fas fa-search-minus' : 'fas fa-folder-open'"></i>
+        </div>
+        <p class="text-xs font-medium text-foreground/80">
+          {{ searchQuery ? t('fileManager.noSearchResults', '未找到匹配的文件或文件夹') : t('fileManager.emptyDirectory', '此目录为空') }}
+        </p>
+        <p v-if="searchQuery" class="text-[11px] text-text-secondary">
+          当前搜索词: "{{ searchQuery }}"
+        </p>
+      </div>
+
+      <!-- 文件列表容器（切换目录/加载完成时平滑淡入浮现） -->
+      <div :key="listAnimationKey" class="space-y-1.5 mobile-file-list-enter">
+        <!-- 虚拟滚动顶部垫片 -->
+        <div v-if="virtualRange.topPadding > 0" :style="{ height: `${virtualRange.topPadding}px` }"></div>
+
+        <!-- 文件与文件夹卡片流 -->
+        <div
+          v-for="({ item, index }) in virtualRange.visibleList"
+          :key="item.filename"
+          class="group w-full flex items-center transition-all duration-300 cursor-pointer border"
+          :class="[
+            isCompact ? 'gap-2.5 px-3 py-1.5 rounded-lg' : 'gap-3 px-3 py-2 rounded-xl',
+            selectedItems.has(item.filename)
+              ? 'bg-primary/15 border-primary/50 text-foreground shadow-2xs'
+              : navigatingFolderName === item.filename
+                ? 'bg-primary/10 border-primary/40 ring-1 ring-primary/40 text-foreground'
+                : item._justAdded
+                  ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/30'
+                  : item._justUpdated
+                    ? 'bg-amber-500/15 border-amber-500/50 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/30'
+                    : getItemHighlightColor(item)
+                      ? 'hover:brightness-95 active:brightness-90 dark:hover:brightness-110'
+                      : 'bg-header/20 hover:bg-header/50 active:bg-header/70 border-border/40 text-foreground',
+            isEnteringNewDirectory ? 'mobile-card-enter' : ''
+          ]"
+          :style="[
+            isEnteringNewDirectory ? { animationDelay: `${Math.min(index, 8) * 35}ms` } : {},
+            (!selectedItems.has(item.filename) && navigatingFolderName !== item.filename && getItemHighlightColor(item))
+              ? { backgroundColor: `${getItemHighlightColor(item)}12`, borderColor: `${getItemHighlightColor(item)}40` }
+              : {}
+          ]"
+          @click="handleRowClick(item)"
+          @touchstart="handleTouchStart(item, $event)"
+          @touchmove="handleTouchMove($event)"
+          @touchend="handleTouchEnd"
+          @touchcancel="handleTouchEnd"
+        >
+          <!-- 多选模式下的复选框 (加大独立触控热区，防误触) -->
+          <div
+            v-if="isMultiSelectMode"
+            class="shrink-0 flex items-center justify-center w-8 h-8 -ml-1 cursor-pointer"
+            @click.stop="emit('toggle-select', item)"
+            title="选择此项"
+          >
+            <div
+              class="w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all"
+              :class="selectedItems.has(item.filename) ? 'bg-primary border-primary text-white scale-105 shadow-xs' : 'border-border/80 bg-header/60'"
+            >
+              <i v-if="selectedItems.has(item.filename)" class="fas fa-check text-[10px]"></i>
+            </div>
+          </div>
+
+          <!-- 文件/文件夹图标 (正方形小色块，高亮色阶梯联动防融合) -->
+          <div
+            class="rounded-lg border flex items-center justify-center shrink-0 transition-colors"
+            :class="[
+              isCompact ? 'w-7.5 h-7.5' : 'w-9 h-9',
+              getItemHighlightColor(item)
+                ? 'shadow-2xs'
+                : 'bg-header/50 border-border/40'
+            ]"
+            :style="getItemHighlightColor(item) ? {
+              backgroundColor: `${getItemHighlightColor(item)}30`,
+              borderColor: `${getItemHighlightColor(item)}55`,
+              color: getItemHighlightColor(item)
+            } : undefined"
+          >
+            <i
+              v-if="navigatingFolderName === item.filename"
+              class="fas fa-circle-notch fa-spin text-amber-400"
+              :class="isCompact ? 'text-base' : 'text-lg'"
+            ></i>
+            <i
+              v-else
+              :class="[
+                item.attrs.isDirectory ? 'fas fa-folder' :
+                item.attrs.isSymbolicLink ? 'fas fa-link' :
+                `${getFileIconClass(item.filename)}`,
+                (!getItemHighlightColor(item) && item.attrs.isDirectory) ? 'text-amber-400' : '',
+                (!getItemHighlightColor(item) && item.attrs.isSymbolicLink) ? 'text-cyan-400' : '',
+                isCompact ? 'text-base' : 'text-lg'
+              ]"
+            ></i>
+          </div>
+
+          <!-- 中间信息：文件名与元数据 (紧凑模式下隐藏元数据) -->
+          <div class="min-w-0 flex-1 flex flex-col justify-center">
+            <div class="text-[13px] font-medium leading-tight truncate text-foreground tracking-tight">
+              {{ item.filename }}
+            </div>
+            <!-- 详细模式下显示的日期、权限与类型 -->
+            <div v-if="!isCompact" class="flex items-center gap-1.5 text-[10px] text-text-secondary mt-1 flex-wrap">
+              <span v-if="item.attrs.isFile" class="font-mono text-text-secondary/90">
+                {{ formatFileSize(item.attrs.size) }}
+              </span>
+              <span v-else class="text-primary font-medium">
+                文件夹
+              </span>
+              <span class="text-text-secondary/40">•</span>
+              <span class="font-mono text-text-secondary/80">
+                {{ formatFileDate(item.attrs.mtime) }}
+              </span>
+              <span class="text-text-secondary/40">•</span>
+              <span class="font-mono text-text-secondary/70">
+                {{ formatFileMode(item.attrs.mode) }}
+              </span>
+            </div>
+          </div>
+
+          <!-- 右侧：进入引导或更多操作按钮 -->
+          <div class="flex items-center shrink-0 gap-1.5">
+            <!-- 正在进入的加载指示器 -->
+            <div v-if="navigatingFolderName === item.filename" class="w-6 h-6 flex items-center justify-center text-primary">
+              <i class="fas fa-spinner fa-spin text-xs"></i>
+            </div>
+
+            <template v-else>
+              <!-- 多选模式下文件夹右侧显示“进入”引导标签 -->
+              <div
+                v-if="isMultiSelectMode && item.attrs.isDirectory"
+                class="flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary/10 text-primary text-[11px] font-medium shrink-0 pointer-events-none"
+              >
+                <span>进入</span>
+                <i class="fas fa-chevron-right text-[9px]"></i>
+              </div>
+
+              <!-- 更多操作按钮 -->
+              <button
+                class="rounded-lg flex items-center justify-center text-text-secondary hover:text-foreground active:bg-primary/20 hover:bg-header/80 transition-colors"
+                :class="isCompact ? 'w-7 h-7' : 'w-8 h-8'"
+                :title="t('fileManager.moreActions', '操作菜单')"
+                @click="handleMoreClick(item, $event)"
+              >
+                <i class="fas fa-ellipsis-v text-xs"></i>
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- 虚拟滚动底部垫片 -->
+        <div v-if="virtualRange.bottomPadding > 0" :style="{ height: `${virtualRange.bottomPadding}px` }"></div>
+      </div>
+    </div>
+
+    <!-- 底部悬浮多选工具坞 (Floating Selection Dock) -->
+    <Transition name="fade-slide">
+      <div
+        v-if="isMultiSelectMode || selectedItems.size > 0"
+        class="absolute bottom-2.5 left-2.5 right-2.5 z-40 bg-background/95 backdrop-blur-md border border-border/80 shadow-2xl rounded-2xl p-2 flex items-center justify-between gap-1.5"
+      >
+        <!-- 左侧已选计数与全选 -->
+        <div class="flex items-center gap-2 pl-1.5 shrink-0">
+          <button
+            class="text-xs text-primary font-semibold hover:underline flex items-center gap-1 py-1"
+            @click="handleToggleSelectAll"
+          >
+            <i :class="isAllSelected ? 'fas fa-check-square' : 'far fa-square'"></i>
+            <span>{{ isAllSelected ? '全不选' : '全选' }}</span>
+          </button>
+          <span class="text-[11px] text-text-secondary">
+            已选 <strong class="text-foreground">{{ selectedItems.size }}</strong> 项
+          </span>
+        </div>
+
+        <!-- 右侧动作按钮组 -->
+        <div class="flex items-center gap-1">
+          <!-- 复制 -->
+          <button
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:text-foreground active:bg-header border border-border/40"
+            :disabled="selectedItems.size === 0"
+            :class="{ 'opacity-40 cursor-not-allowed': selectedItems.size === 0 }"
+            title="复制"
+            @click="emit('batch-copy')"
+          >
+            <i class="fas fa-copy text-xs"></i>
+          </button>
+
+          <!-- 剪切 -->
+          <button
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:text-foreground active:bg-header border border-border/40"
+            :disabled="selectedItems.size === 0"
+            :class="{ 'opacity-40 cursor-not-allowed': selectedItems.size === 0 }"
+            title="剪切"
+            @click="emit('batch-cut')"
+          >
+            <i class="fas fa-cut text-xs"></i>
+          </button>
+
+          <!-- 批量下载 -->
+          <button
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:text-foreground active:bg-header border border-border/40"
+            :disabled="selectedItems.size === 0"
+            :class="{ 'opacity-40 cursor-not-allowed': selectedItems.size === 0 }"
+            title="下载选中项"
+            @click="emit('batch-download')"
+          >
+            <i class="fas fa-download text-xs"></i>
+          </button>
+
+          <!-- 批量删除 -->
+          <button
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-rose-500 hover:text-rose-600 active:bg-rose-500/20 border border-rose-500/30 bg-rose-500/10"
+            :disabled="selectedItems.size === 0"
+            :class="{ 'opacity-40 cursor-not-allowed': selectedItems.size === 0 }"
+            title="删除选中项"
+            @click="emit('batch-delete')"
+          >
+            <i class="fas fa-trash-alt text-xs"></i>
+          </button>
+
+          <!-- 关闭多选模式 -->
+          <button
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:text-foreground active:bg-header ml-1"
+            title="退出多选"
+            @click="emit('exit-multi-select')"
+          >
+            <i class="fas fa-times text-xs"></i>
+          </button>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- 底部专属剪贴板操作坞 (Floating Clipboard Dock - 复制/剪切后跨目录常驻) -->
+    <Transition name="fade-slide">
+      <div
+        v-if="hasClipboardContent && !isMultiSelectMode && selectedItems.size === 0"
+        class="absolute bottom-2.5 left-2.5 right-2.5 z-40 bg-background/95 backdrop-blur-md border border-primary/50 shadow-2xl rounded-2xl p-2.5 flex items-center justify-between gap-2"
+      >
+        <!-- 左侧状态与来源指示 -->
+        <div class="flex items-center gap-2.5 min-w-0 pl-1">
+          <div
+            class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+            :class="clipboardOperation === 'cut' ? 'bg-indigo-500/15 text-indigo-400' : 'bg-primary/15 text-primary'"
+          >
+            <i :class="clipboardOperation === 'cut' ? 'fas fa-cut' : 'fas fa-copy'" class="text-xs"></i>
+          </div>
+          <div class="min-w-0">
+            <div class="text-xs font-semibold text-foreground truncate leading-tight">
+              {{ clipboardOperation === 'cut' ? '已剪切' : '已复制' }} {{ clipboardCount || 1 }} 个项目
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧动作：粘贴与取消 -->
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            class="h-8 px-3.5 rounded-xl bg-primary text-white text-xs font-semibold flex items-center gap-1.5 active:scale-95 transition-all shadow-md cursor-pointer"
+            @click="emit('batch-paste')"
+          >
+            <i class="fas fa-paste text-xs"></i>
+            <span>粘贴</span>
+          </button>
+          <button
+            type="button"
+            class="w-8 h-8 rounded-xl flex items-center justify-center text-text-secondary hover:text-foreground active:bg-header cursor-pointer transition-colors"
+            title="取消剪贴板"
+            @click="emit('cancel-clipboard')"
+          >
+            <i class="fas fa-times text-xs"></i>
+          </button>
+        </div>
+      </div>
+    </Transition>
+  </div>
+</template>
+
+<style scoped>
+@keyframes mobileListFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.mobile-file-list-enter {
+  animation: mobileListFadeIn 0.22s ease-out both;
+}
+
+@keyframes mobileCardSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mobile-card-enter {
+  animation: mobileCardSlideIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+}
+
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.fade-slide-enter-from,
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(12px) scale(0.98);
+}
+</style>

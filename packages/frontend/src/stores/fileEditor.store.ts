@@ -1,8 +1,8 @@
 import { ref, computed, readonly, watch, nextTick } from 'vue'; 
 import { defineStore } from 'pinia';
 import { useI18n } from 'vue-i18n';
-import { useSessionStore } from './session.store'; 
-import { useUiNotificationsStore } from './uiNotifications.store';
+import { useSessionStore } from './session.store';
+import { useUiNotificationsStore } from './uiNotifications.store'; 
 import type { SaveStatus, SftpReadFileSuccessPayload } from '../types/sftp.types'; 
 import * as iconv from '@vscode/iconv-lite-umd'; 
 import { Buffer } from 'buffer/'; 
@@ -34,6 +34,9 @@ export interface FileTab {
     isModified: boolean;
     scrollTop?: number; // 编辑器垂直滚动位置
     scrollLeft?: number; // 编辑器水平滚动位置
+    remoteMtime?: number; // 最近一次已知的远端修改时间戳 (ms)
+    remoteSize?: number; // 最近一次已知的远端文件大小 (bytes)
+    hasExternalConflict?: boolean; // 远端变动且本地有未保存编辑时的冲突标记
 }
 
 // --- 辅助函数 (移到外部并导出) ---
@@ -111,6 +114,7 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
     // const editorVisibleState = ref<'visible' | 'minimized' | 'closed'>('closed'); // 移除，面板可见性由布局控制
     const popupTrigger = ref(0); // 用于触发弹窗显示的信号
     const popupFileInfo = ref<{ filePath: string; sessionId: string } | null>(null); // 存储弹窗文件信息
+    const isPopupOpen = ref<boolean>(false); // 弹窗编辑器当前是否处于打开/可见状态
 
     // --- 计算属性 ---
     const orderedTabs = computed(() => Array.from(tabs.value.values())); // 获取标签页数组，用于渲染
@@ -134,11 +138,26 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
 
     // --- 核心方法 ---
 
-    // 修改：triggerPopup 接收文件信息并存储
+    // 修改：triggerPopup 接收文件信息并存储，同时标记弹窗为打开
     const triggerPopup = (filePath: string, sessionId: string) => {
         console.log(`[文件编辑器 Store] Triggering popup for ${filePath} in session ${sessionId}.`);
         popupFileInfo.value = { filePath, sessionId };
+        isPopupOpen.value = true;
         popupTrigger.value++; // 增加触发器值以通知监听者
+    };
+
+    const openPopup = (filePath: string = '', sessionId?: string | null) => {
+        if (sessionId) {
+            popupFileInfo.value = { filePath, sessionId };
+        } else if (!popupFileInfo.value && sessionStore.activeSessionId) {
+            popupFileInfo.value = { filePath, sessionId: sessionStore.activeSessionId };
+        }
+        isPopupOpen.value = true;
+        popupTrigger.value++;
+    };
+
+    const closePopup = () => {
+        isPopupOpen.value = false;
     };
 
     // 移除内部的 getSftpManager 辅助函数，将直接使用 sessionStore.getOrCreateSftpManager
@@ -149,7 +168,7 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
 
     // 打开或切换到文件标签页
     // 修改：添加 instanceId 参数
-    const openFile = async (targetFilePath: string, sessionId: string, instanceId: string) => {
+    const openFile = async (targetFilePath: string, sessionId: string, instanceId: string = 'global') => {
         // 在共享模式下，我们仍然需要 sessionId 来构建唯一的 tabId
         // 并与 SFTP 管理器关联
         const tabId = `${sessionId}:${targetFilePath}`; // Tab ID 仍然基于 sessionId 和 filePath 保持唯一性
@@ -200,11 +219,24 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
         // 不再在这里触发弹窗
         // popupTrigger.value++;
 
+        // 容错解析 effectiveSessionId：若传入的 sessionId 找不到对应会话，尝试根据当前活跃或唯一会话定位
+        let effectiveSessionId = sessionId;
+        let session = sessionStore.sessions.get(effectiveSessionId);
+        if (!session) {
+            if (sessionStore.sessions.size === 1) {
+                effectiveSessionId = sessionStore.sessions.keys().next().value!;
+                session = sessionStore.sessions.get(effectiveSessionId);
+            } else if (sessionStore.activeSessionId && sessionStore.sessions.has(sessionStore.activeSessionId)) {
+                effectiveSessionId = sessionStore.activeSessionId;
+                session = sessionStore.sessions.get(effectiveSessionId);
+            }
+        }
+
         // 获取 SFTP 管理器 - 修改：使用 sessionStore.getOrCreateSftpManager 并传入 instanceId
-        const sftpManager = sessionStore.getOrCreateSftpManager(sessionId, instanceId);
+        const sftpManager = sessionStore.getOrCreateSftpManager(effectiveSessionId, instanceId);
         if (!sftpManager) {
             // 错误消息保持不变，但现在知道是哪个实例找不到管理器
-            console.error(`[文件编辑器 Store] 无法找到会话 ${sessionId} (实例 ${instanceId}) 的 SFTP 管理器。`);
+            console.error(`[文件编辑器 Store] 无法找到会话 ${effectiveSessionId} (实例 ${instanceId}) 的 SFTP 管理器。`);
             const tabToUpdate = tabs.value.get(tabId);
             if (tabToUpdate) {
                 tabToUpdate.isLoading = false;
@@ -242,6 +274,21 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
             tabs.value.set(tabId, updatedTab); // 替换以确保响应性
 
             console.log(`[文件编辑器 Store] 文件 ${targetFilePath} 内容已解码 (${fileData.encodingUsed}) 并设置到标签页 ${tabId}。`);
+
+            sftpManager.stat(targetFilePath).then((stats) => {
+                const cur = tabs.value.get(tabId);
+                if (cur) {
+                    cur.remoteMtime = stats.mtime;
+                    cur.remoteSize = stats.size;
+                }
+            }).catch(() => {
+                const cur = tabs.value.get(tabId);
+                if (cur) {
+                    cur.remoteMtime = Date.now();
+                }
+            }).finally(() => {
+                startFileWatcher();
+            });
 
         } catch (err: any) {
             console.error(`[文件编辑器 Store] 读取文件 ${targetFilePath} 失败:`, err);
@@ -352,6 +399,15 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
             tab.saveError = null;
             tab.originalContent = contentToSave; // 更新原始内容
             tab.isModified = false; // 重置修改状态
+            tab.hasExternalConflict = false; // 清除冲突标记
+
+            // 刷新本地已知的远端状态，避免自保存被误判为外部变动
+            sftpManager.stat(tab.filePath).then((stats) => {
+                tab.remoteMtime = stats.mtime;
+                tab.remoteSize = stats.size;
+            }).catch(() => {
+                tab.remoteMtime = Date.now();
+            });
 
             setTimeout(() => {
                 if (tab.saveStatus === 'success') {
@@ -506,14 +562,26 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
             console.warn(`[文件编辑器 Store] 尝试更改不存在的标签页 ${tabId} 的编码。`);
             return;
         }
+        if (tab.selectedEncoding === newEncoding) {
+            console.log(`[文件编辑器 Store] 编码已经是 ${newEncoding}，无需更改。`);
+            return;
+        }
+        if (!tab.rawContentBase64 && tab.content) {
+            try {
+                const bytes = new TextEncoder().encode(tab.content);
+                let binary = '';
+                for (let i = 0; i < bytes.byteLength; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                tab.rawContentBase64 = window.btoa(binary);
+            } catch (e) {
+                // ignore
+            }
+        }
         if (!tab.rawContentBase64) {
             console.error(`[文件编辑器 Store] 无法更改编码：标签页 ${tabId} 没有原始文件数据。`);
             // 可以设置错误状态
             tab.loadingError = '缺少原始文件数据，无法更改编码';
-            return;
-        }
-        if (tab.selectedEncoding === newEncoding) {
-            console.log(`[文件编辑器 Store] 编码已经是 ${newEncoding}，无需更改。`);
             return;
         }
 
@@ -563,9 +631,241 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
             tab.scrollLeft = scrollLeft;
         }
     };
- 
-    // 移除旧的 updateContent，因为它只更新活动标签页
-    // const updateContent = (newContent: string) => { ... };
+
+    // +++ 从云端快照即时恢复标签页 (秒开呈现，不依赖远程网络耗时) +++
+    const restoreTabFromSnapshot = (tabSnapshot: {
+        id?: string;
+        sessionId: string;
+        filePath: string;
+        filename?: string;
+        content?: string;
+        rawContentBase64?: string | null;
+        isModified?: boolean;
+        language?: string;
+        selectedEncoding?: string;
+        scrollTop?: number;
+        scrollLeft?: number;
+    }): string => {
+        const tabId = `${tabSnapshot.sessionId}:${tabSnapshot.filePath}`;
+        const existingTab = tabs.value.get(tabId);
+        if (existingTab) {
+            if (typeof tabSnapshot.content === 'string') existingTab.content = tabSnapshot.content;
+            if (tabSnapshot.rawContentBase64) existingTab.rawContentBase64 = tabSnapshot.rawContentBase64;
+            if (typeof tabSnapshot.isModified === 'boolean') existingTab.isModified = tabSnapshot.isModified;
+            if (typeof tabSnapshot.scrollTop === 'number') existingTab.scrollTop = tabSnapshot.scrollTop;
+            if (typeof tabSnapshot.scrollLeft === 'number') existingTab.scrollLeft = tabSnapshot.scrollLeft;
+            return tabId;
+        }
+
+        // 兜底生成 rawContentBase64
+        let initialRaw = tabSnapshot.rawContentBase64 || null;
+        if (!initialRaw && tabSnapshot.content) {
+            try {
+                const bytes = new TextEncoder().encode(tabSnapshot.content);
+                let binary = '';
+                for (let i = 0; i < bytes.byteLength; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                initialRaw = window.btoa(binary);
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        const newTab: FileTab = {
+            id: tabId,
+            sessionId: tabSnapshot.sessionId,
+            filePath: tabSnapshot.filePath,
+            filename: tabSnapshot.filename || getFilenameFromPath(tabSnapshot.filePath),
+            content: tabSnapshot.content ?? '',
+            originalContent: tabSnapshot.isModified ? '' : (tabSnapshot.content ?? ''),
+            rawContentBase64: initialRaw,
+            language: tabSnapshot.language || getLanguageFromFilename(tabSnapshot.filePath),
+            selectedEncoding: tabSnapshot.selectedEncoding || 'utf-8',
+            isLoading: false,
+            loadingError: null,
+            isSaving: false,
+            saveStatus: 'idle',
+            saveError: null,
+            isModified: !!tabSnapshot.isModified,
+            scrollTop: tabSnapshot.scrollTop || 0,
+            scrollLeft: tabSnapshot.scrollLeft || 0,
+        };
+        tabs.value.set(tabId, newTab);
+        return tabId;
+    };
+
+    // +++ 重新加载文件（从远端拉取最新数据） +++
+    const reloadFile = async (tabId: string, silent = false): Promise<boolean> => {
+        const tab = tabs.value.get(tabId);
+        if (!tab) return false;
+
+        const session = sessionStore.sessions.get(tab.sessionId);
+        if (!session) return false;
+
+        const sftpManagersMap = session.sftpManagers;
+        if (!sftpManagersMap || sftpManagersMap.size === 0) return false;
+        const firstEntry = sftpManagersMap.entries().next().value;
+        if (!firstEntry || !firstEntry[1]) return false;
+        const sftpManager = firstEntry[1];
+
+        try {
+            const fileData: SftpReadFileSuccessPayload = await sftpManager.readFile(tab.filePath, tab.selectedEncoding);
+            const currentTab = tabs.value.get(tabId);
+            if (!currentTab) return false;
+
+            const newContent = decodeRawContent(fileData.rawContentBase64, fileData.encodingUsed);
+
+            currentTab.rawContentBase64 = fileData.rawContentBase64;
+            currentTab.content = newContent;
+            currentTab.originalContent = newContent;
+            currentTab.isModified = false;
+            currentTab.hasExternalConflict = false;
+
+            // 同步刷新远端 mtime 和 size
+            sftpManager.stat(tab.filePath).then((stats) => {
+                const cur = tabs.value.get(tabId);
+                if (cur) {
+                    cur.remoteMtime = stats.mtime;
+                    cur.remoteSize = stats.size;
+                }
+            }).catch(() => {
+                const cur = tabs.value.get(tabId);
+                if (cur) {
+                    cur.remoteMtime = Date.now();
+                }
+            });
+
+            console.log(`[文件编辑器 Store] 文件 ${tab.filePath} 已从远端重新加载 (静默: ${silent})。`);
+            return true;
+        } catch (err: any) {
+            console.error(`[文件编辑器 Store] 重新加载文件 ${tab.filePath} 失败:`, err);
+            return false;
+        }
+    };
+
+    // +++ 探测特定文件的外部修改状态 +++
+    const isCheckingExternalRef = ref(false);
+    const checkFileExternalChanges = async (tabId: string) => {
+        if (isCheckingExternalRef.value) return;
+        const tab = tabs.value.get(tabId);
+        if (!tab || tab.isLoading || tab.isSaving) return;
+
+        const session = sessionStore.sessions.get(tab.sessionId);
+        if (!session || !session.wsManager.isConnected.value || !session.wsManager.isSftpReady.value) {
+            return;
+        }
+
+        const sftpManagersMap = session.sftpManagers;
+        if (!sftpManagersMap || sftpManagersMap.size === 0) return;
+        const firstEntry = sftpManagersMap.entries().next().value;
+        if (!firstEntry || !firstEntry[1]) return false;
+        const sftpManager = firstEntry[1];
+
+        isCheckingExternalRef.value = true;
+        try {
+            const stats = await sftpManager.stat(tab.filePath);
+            const currentTab = tabs.value.get(tabId);
+            if (!currentTab) return;
+
+            // 首次未记录，初始化基准
+            if (currentTab.remoteMtime === undefined) {
+                currentTab.remoteMtime = stats.mtime;
+                currentTab.remoteSize = stats.size;
+                return;
+            }
+
+            // 判断远端是否已被修改（mtime 晚于已知时间戳，或大小发生变化）
+            const isMtimeChanged = stats.mtime > currentTab.remoteMtime;
+            const isSizeChanged = currentTab.remoteSize !== undefined && stats.size !== currentTab.remoteSize;
+
+            if (isMtimeChanged || isSizeChanged) {
+                console.log(`[文件编辑器 Store] 检测到远端文件 ${currentTab.filePath} 已发生外部变动 (已知mtime: ${currentTab.remoteMtime}, 远端mtime: ${stats.mtime})`);
+
+                if (!currentTab.isModified) {
+                    // 本地干净（无未保存修改）：自动静默热重载！
+                    await reloadFile(tabId, true);
+                } else {
+                    // 本地有脏数据：标记冲突，保护用户代码不被覆盖！
+                    currentTab.hasExternalConflict = true;
+                    currentTab.remoteMtime = stats.mtime;
+                    currentTab.remoteSize = stats.size;
+                }
+            }
+        } catch {
+            // 静默忽略检查异常
+        } finally {
+            isCheckingExternalRef.value = false;
+        }
+    };
+
+    // +++ 冲突解决：以远端内容重新加载 +++
+    const resolveConflictReload = async (tabId: string) => {
+        await reloadFile(tabId, false);
+    };
+
+    // +++ 冲突解决：强制本地覆盖远端 +++
+    const resolveConflictOverwrite = async (tabId: string) => {
+        await saveFile(tabId);
+    };
+
+    // +++ 冲突解决：忽略本次外部改动 +++
+    const resolveConflictIgnore = (tabId: string) => {
+        const tab = tabs.value.get(tabId);
+        if (tab) {
+            tab.hasExternalConflict = false;
+        }
+    };
+
+    // --- 实时监听调度器 (仅对 activeTab 进行高频轻量探针，开箱即用) ---
+    let watcherTimerId: any = null;
+
+    const startFileWatcher = () => {
+        if (watcherTimerId) return;
+        watcherTimerId = setInterval(() => {
+            if (activeTabId.value && tabs.value.size > 0) {
+                checkFileExternalChanges(activeTabId.value);
+            }
+        }, 1500);
+    };
+
+    const stopFileWatcher = () => {
+        if (watcherTimerId) {
+            clearInterval(watcherTimerId);
+            watcherTimerId = null;
+        }
+    };
+
+    // 窗口聚焦时即刻探测（用户在终端修改后切回编辑器的瞬间）
+    const handleWindowFocus = () => {
+        if (activeTabId.value && tabs.value.size > 0) {
+            checkFileExternalChanges(activeTabId.value);
+        }
+    };
+
+    // 切换活动标签页时立即主动检查一次
+    watch(activeTabId, (newId) => {
+        if (newId) {
+            checkFileExternalChanges(newId);
+        }
+    });
+
+    // 根据是否有打开标签页自动启停探针（监听 tabs.value.size）
+    watch(() => tabs.value.size, (newSize) => {
+        if (newSize > 0) {
+            startFileWatcher();
+        } else {
+            stopFileWatcher();
+        }
+    }, { immediate: true });
+
+    if (typeof window !== 'undefined') {
+        window.addEventListener('focus', handleWindowFocus);
+        // 初始若有标签也启动
+        if (tabs.value.size > 0) {
+            startFileWatcher();
+        }
+    }
 
     // 监听会话关闭事件，移除相关标签页
     watch(() => sessionStore.sessions, (newSessions, oldSessions) => {
@@ -629,7 +929,16 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
         updateFileContent, // 暴露新的更新方法
         changeEncoding, // +++ 暴露更改编码的方法 +++
         triggerPopup, // 暴露新的触发方法
+        isPopupOpen, // 弹窗编辑器显隐状态
+        openPopup, // 打开弹窗编辑器
+        closePopup, // 关闭弹窗编辑器
         // setEditorVisibility, // 移除
         updateTabScrollPosition, // +++ 暴露更新滚动位置的方法 +++
+        restoreTabFromSnapshot, // +++ 暴露快照即时恢复方法 +++
+        reloadFile,
+        checkFileExternalChanges,
+        resolveConflictReload,
+        resolveConflictOverwrite,
+        resolveConflictIgnore,
     };
 });

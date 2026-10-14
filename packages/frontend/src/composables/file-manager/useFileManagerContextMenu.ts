@@ -2,6 +2,7 @@ import { ref, nextTick, type Ref, type ComponentPublicInstance } from 'vue';
 import type { FileListItem } from '../../types/sftp.types'; 
 import { type useI18n } from 'vue-i18n'; 
 import type FileManagerContextMenu from '../../components/FileManagerContextMenu.vue'; 
+import { PRESET_HIGHLIGHT_COLORS } from '../../stores/fileColorHighlights.store';
 
 // 定义菜单项类型 (可以根据需要扩展)
 export interface ContextMenuItem {
@@ -10,6 +11,8 @@ export interface ContextMenuItem {
   disabled?: boolean;
   separator?: boolean; // 添加分隔符类型
   submenu?: ContextMenuItem[]; // 添加二级菜单支持
+  color?: string; // 颜色圆点
+  icon?: string; // 图标类名
 }
 
 // 支持的压缩格式
@@ -49,6 +52,18 @@ export interface UseFileManagerContextMenuOptions {
   onCompressRequest: (items: FileListItem[], format: CompressFormat) => void; // +++ 压缩回调 +++
   onDecompressRequest: (item: FileListItem) => void; // +++ 解压回调 +++
   onCopyPath?: (item: FileListItem) => void; // +++ 复制路径回调 +++
+  onAddToFavorites?: (item?: FileListItem) => void; // +++ 添加到常用路径回调 +++
+  onSetHighlightColor?: (item: FileListItem, color: string | null) => void; // +++ 标记颜色回调 +++
+  currentHighlightColor?: (item: FileListItem) => string | undefined; // +++ 当前颜色获取 +++
+  onToggleSearch?: () => void; // 顶栏功能入右键菜单：搜索
+  onToggleViewMode?: () => void; // 顶栏功能入右键菜单：视图
+  onToggleDirectoryTree?: () => void; // 顶栏功能入右键菜单：目录树
+  onCycleTerminalSync?: () => void; // 顶栏功能入右键菜单：终端同步
+  onCdToTerminal?: () => void; // 顶栏功能入右键菜单：终端目录
+  onOpenPopupEditor?: () => void; // 顶栏功能入右键菜单：编辑器
+  onGoUp?: () => void; // 面包屑功能入右键菜单：上一级
+  onGoRoot?: () => void; // 面包屑功能入右键菜单：根目录
+  onCopyCurrentPath?: () => void; // 面包屑功能入右键菜单：复制路径
 }
 
 // 辅助函数：检查文件是否为支持的压缩格式
@@ -84,6 +99,18 @@ export function useFileManagerContextMenu(options: UseFileManagerContextMenuOpti
     onCompressRequest, // +++ 解构压缩回调 +++
     onDecompressRequest, // +++ 解构解压回调 +++
     onCopyPath, // +++ 解构复制路径回调 +++
+    onAddToFavorites, // +++ 解构添加到常用路径回调 +++
+    onSetHighlightColor, // +++ 解构标记颜色回调 +++
+    currentHighlightColor, // +++ 解构当前颜色获取 +++
+    onToggleSearch,
+    onToggleViewMode,
+    onToggleDirectoryTree,
+    onCycleTerminalSync,
+    onCdToTerminal,
+    onOpenPopupEditor,
+    onGoUp,
+    onGoRoot,
+    onCopyCurrentPath,
   } = options;
 
   const contextMenuVisible = ref(false);
@@ -181,6 +208,36 @@ export function useFileManagerContextMenu(options: UseFileManagerContextMenuOpti
        if (onCopyPath) {
          menu.push({ label: t('fileManager.actions.copyPath', 'Copy Path'), action: () => onCopyPath(targetItem), disabled: !(isConnected.value && isSftpReady.value) });
        }
+       if (onAddToFavorites && targetItem.attrs.isDirectory) {
+         menu.push({ label: t('fileManager.actions.addToFavorites', '添加到收藏路径'), action: () => onAddToFavorites(targetItem), disabled: !(isConnected.value && isSftpReady.value) });
+       }
+
+       // +++ 添加标记颜色二级菜单 +++
+       if (onSetHighlightColor) {
+         const activeColor = currentHighlightColor ? currentHighlightColor(targetItem) : undefined;
+         const colorSubmenu: ContextMenuItem[] = PRESET_HIGHLIGHT_COLORS.map(c => ({
+           label: `${t(`fileManager.colors.${c.key}`, c.name)}${activeColor === c.color ? '  ✓' : ''}`,
+           color: c.color,
+           action: () => onSetHighlightColor(targetItem, c.color),
+           disabled: !(isConnected.value && isSftpReady.value)
+         }));
+
+         if (activeColor) {
+           colorSubmenu.push({ label: '', separator: true });
+           colorSubmenu.push({
+             label: t('fileManager.colors.clear', '清除颜色'),
+             icon: 'fas fa-ban text-rose-500',
+             action: () => onSetHighlightColor(targetItem, null),
+             disabled: !(isConnected.value && isSftpReady.value)
+           });
+         }
+
+         menu.push({
+           label: t('fileManager.contextMenu.highlightColor', '标记颜色'),
+           submenu: colorSubmenu,
+           disabled: !(isConnected.value && isSftpReady.value)
+         });
+       }
 
         // --- 分隔符 (视觉) ---
         // The invalid object literal was here and is now removed.
@@ -238,13 +295,27 @@ export function useFileManagerContextMenu(options: UseFileManagerContextMenuOpti
             // 1. 粘贴
             { label: t('fileManager.actions.paste'), action: onPaste, disabled: !(isConnected.value && isSftpReady.value) || !hasClipboardContent },
             // --- 分隔符 (视觉) ---
-            // 2. 新建、上传
+            // 2. 新建、上传、收藏当前目录
             { label: t('fileManager.actions.newFolder'), action: onNewFolder, disabled: !(isConnected.value && isSftpReady.value) },
             { label: t('fileManager.actions.newFile'), action: onNewFile, disabled: !(isConnected.value && isSftpReady.value) },
             { label: t('fileManager.actions.upload'), action: onUpload, disabled: !(isConnected.value && isSftpReady.value) },
+            ...(onAddToFavorites ? [{ label: t('fileManager.actions.addCurrentToFavorites', '收藏当前路径'), action: () => onAddToFavorites(), disabled: !(isConnected.value && isSftpReady.value) }] : []),
             // --- 分隔符 (视觉) ---
             // 3. 刷新
             { label: t('fileManager.actions.refresh'), action: onRefresh, disabled: !(isConnected.value && isSftpReady.value) },
+            // --- 分隔符 (视觉) ---
+            // 4. 顶栏功能（搜索/视图/目录树/终端同步/终端目录/编辑器）
+            ...(onToggleSearch ? [{ label: t('fileManager.actions.toggleSearch', '搜索'), action: () => onToggleSearch(), disabled: !isConnected.value }] : []),
+            ...(onToggleViewMode ? [{ label: t('fileManager.actions.toggleViewMode', '切换视图'), action: () => onToggleViewMode(), disabled: !isConnected.value }] : []),
+            ...(onToggleDirectoryTree ? [{ label: t('fileManager.actions.toggleDirectoryTree', '目录树'), action: () => onToggleDirectoryTree(), disabled: !isConnected.value }] : []),
+            ...(onCycleTerminalSync ? [{ label: t('fileManager.actions.cycleTerminalSync', '终端同步'), action: () => onCycleTerminalSync(), disabled: !isConnected.value }] : []),
+            ...(onCdToTerminal ? [{ label: t('fileManager.actions.cdToTerminal', '终端目录'), action: () => onCdToTerminal(), disabled: !isConnected.value }] : []),
+            ...(onOpenPopupEditor ? [{ label: t('fileManager.actions.openEditor', '独立编辑器'), action: () => onOpenPopupEditor(), disabled: !isConnected.value }] : []),
+            // --- 分隔符 (视觉) ---
+            // 5. 面包屑功能（上一级/根目录/复制路径）
+            ...(onGoUp ? [{ label: t('fileManager.actions.parentDirectory', '上一级'), action: () => onGoUp(), disabled: !isConnected.value }] : []),
+            ...(onGoRoot ? [{ label: t('fileManager.actions.rootDirectory', '根目录'), action: () => onGoRoot(), disabled: !isConnected.value }] : []),
+            ...(onCopyCurrentPath ? [{ label: t('fileManager.actions.copyPath', '复制路径'), action: () => onCopyCurrentPath(), disabled: !isConnected.value }] : []),
         ];
     } else { // Clicked on '..'
         menu = [

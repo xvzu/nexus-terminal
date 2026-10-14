@@ -6,6 +6,7 @@ import apiClient from '../utils/apiClient'; // 使用统一的 apiClient
 export interface TagInfo {
     id: number;
     name: string;
+    background_color?: string | null;
     created_at: number;
     updated_at: number;
 }
@@ -63,35 +64,41 @@ export const useTagsStore = defineStore('tags', () => {
     }
 
     // 添加新标签 (添加后清除缓存)
-    async function addTag(name: string): Promise<TagInfo | null> {
+    async function addTag(name: string, backgroundColor?: string | null): Promise<TagInfo | null> {
         isLoading.value = true;
         error.value = null;
         try {
-            const response = await apiClient.post<{ message: string, tag: TagInfo }>('/tags', { name });
+            const response = await apiClient.post<{ message: string, tag: TagInfo }>('/tags', {
+                name,
+                background_color: backgroundColor || null
+            });
             const newTag = response.data.tag;
-            tags.value.push(newTag);
-            try { localStorage.setItem('tagsCache', JSON.stringify(tags.value)); } catch {}
-            return newTag;
+            // 添加成功后，清除缓存并重新获取 (fetchTags 会更新本地列表)
+            localStorage.removeItem('tagsCache');
+            await fetchTags(); // fetchTags 会处理获取和缓存更新
+            return newTag; // 返回新标签信息
         } catch (err: any) {
             console.error('Failed to add tag:', err);
             error.value = err.response?.data?.message || err.message || '添加标签失败';
-            return null;
+            return null; // 返回 null 表示失败
         } finally {
             isLoading.value = false;
         }
     }
 
     // 更新标签
-    async function updateTag(id: number, name: string): Promise<boolean> {
+    async function updateTag(id: number, name?: string, backgroundColor?: string | null): Promise<boolean> {
         isLoading.value = true;
         error.value = null;
         try {
-            await apiClient.put(`/tags/${id}`, { name });
-            const index = tags.value.findIndex(t => t.id === id);
-            if (index !== -1) {
-                tags.value[index] = { ...tags.value[index], name, updated_at: Date.now() };
-            }
-            try { localStorage.setItem('tagsCache', JSON.stringify(tags.value)); } catch {}
+            const payload: Record<string, any> = {};
+            if (typeof name !== 'undefined') payload.name = name;
+            if (typeof backgroundColor !== 'undefined') payload.background_color = backgroundColor;
+
+            await apiClient.put(`/tags/${id}`, payload);
+            // 更新成功后，清除缓存并重新获取
+            localStorage.removeItem('tagsCache');
+            await fetchTags();
             return true;
         } catch (err: any) {
             console.error('Failed to update tag:', err);
@@ -102,13 +109,15 @@ export const useTagsStore = defineStore('tags', () => {
         }
     }
 
+    // 删除标签
     async function deleteTag(id: number): Promise<boolean> {
         isLoading.value = true;
         error.value = null;
         try {
-            await apiClient.delete(`/tags/${id}`);
-            tags.value = tags.value.filter(t => t.id !== id);
-            try { localStorage.setItem('tagsCache', JSON.stringify(tags.value)); } catch {}
+            await apiClient.delete(`/tags/${id}`); // 使用 apiClient 并移除 base URL
+            // 删除成功后，清除缓存并重新获取
+            localStorage.removeItem('tagsCache');
+            await fetchTags();
             return true;
         } catch (err: any) {
             console.error('Failed to delete tag:', err);
@@ -124,8 +133,21 @@ export const useTagsStore = defineStore('tags', () => {
         isLoading.value = true;
         error.value = null;
         try {
+            // 假设后端 API 端点是 PUT /api/tags/:tagId/connections
             await apiClient.put(`/tags/${tagId}/connections`, { connection_ids: connectionIds });
-            try { localStorage.setItem('tagsCache', JSON.stringify(tags.value)); } catch {}
+            // 更新成功后，清除相关缓存并重新获取数据以确保一致性
+            localStorage.removeItem('tagsCache'); // 清除标签缓存
+            localStorage.removeItem('connectionsCache'); // 清除连接缓存，因为连接的 tag_ids 可能已更改
+
+            await fetchTags(); // 重新获取标签
+            // 可能还需要通知 connectionsStore 重新获取连接，或者在这里直接调用
+            // (这取决于您希望如何管理 store 间的依赖和数据同步)
+            // 例如: const connectionsStore = useConnectionsStore(); await connectionsStore.fetchConnections();
+            // 为简单起见，这里假设调用者会处理连接列表的刷新，或者依赖于后续的自动刷新机制。
+            // 或者，更健壮的做法是在此 action 成功后，让 connectionsStore 也刷新。
+            // 但为了减少此处的直接依赖，暂时只刷新 tagsStore。
+            // WorkspaceConnectionList 在模态框保存成功后会重新 fetchConnections。
+
             return true;
         } catch (err: any) {
             console.error(`Failed to update connections for tag ${tagId}:`, err);
@@ -138,12 +160,22 @@ export const useTagsStore = defineStore('tags', () => {
 
     return {
         tags,
+        folders: tags, // 文件夹语义别名
         isLoading,
         error,
         fetchTags,
+        fetchFolders: fetchTags,
         addTag,
+        createFolder: addTag,
         updateTag,
+        renameFolder: updateTag,
+        updateFolder: updateTag,
+        updateFolderColor: (id: number, color: string | null) => updateTag(id, undefined, color),
         deleteTag,
+        deleteFolder: deleteTag,
         updateTagConnections, // 暴露新的 action
     };
 });
+
+// 文件夹信息接口类型别名
+export type FolderInfo = TagInfo;

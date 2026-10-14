@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import AddConnectionForm from '../components/AddConnectionForm.vue'; 
+import MobileDashboard from '../components/MobileDashboard.vue';
+import { useDeviceDetection } from '../composables/useDeviceDetection';
+import { hexToRgba } from '../utils/colorUtils';
 import { useConnectionsStore } from '../stores/connections.store';
 import { useAuditLogStore } from '../stores/audit.store';
 import { useSessionStore } from '../stores/session.store';
@@ -18,6 +21,15 @@ import type { Locale } from 'date-fns';
 
 const { t, locale } = useI18n();
 const router = useRouter();
+const { isMobile } = useDeviceDetection();
+const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1024);
+
+const handleResize = () => {
+  windowWidth.value = window.innerWidth;
+};
+
+const isMobileMode = computed(() => isMobile.value || windowWidth.value < 768);
+
 const connectionsStore = useConnectionsStore();
 const auditLogStore = useAuditLogStore();
 const sessionStore = useSessionStore();
@@ -29,6 +41,17 @@ const { logs: auditLogs, isLoading: isLoadingLogs, totalLogs } = storeToRefs(aud
 const { tags, isLoading: isLoadingTags } = storeToRefs(tagsStore); 
 
 
+
+const getConnectionCardStyle = (backgroundColor?: string | null) => {
+  if (!backgroundColor) return {};
+  return {
+    '--conn-card-bg': hexToRgba(backgroundColor, 0.14),
+    '--conn-card-hover-bg': hexToRgba(backgroundColor, 0.22),
+    '--conn-card-border': hexToRgba(backgroundColor, 0.32),
+    backgroundColor: 'var(--conn-card-bg)',
+    borderColor: 'var(--conn-card-border)',
+  };
+};
 
 const LS_SORT_BY_KEY = 'dashboard_connections_sort_by';
 const LS_SORT_ORDER_KEY = 'dashboard_connections_sort_order';
@@ -153,6 +176,11 @@ onMounted(async () => {
   } catch (error) {
     console.error("加载标签列表失败:", error);
   }
+  window.addEventListener('resize', handleResize);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize);
 });
 
 const connectTo = (connection: ConnectionInfo) => {
@@ -284,45 +312,70 @@ const handleConnectionModified = async () => {
 </script>
 
 <template>
-  <div class="p-4 md:p-6 lg:p-8 bg-background text-foreground">
+  <!-- 移动端特化版本 -->
+  <MobileDashboard v-if="isMobileMode" />
+
+  <!-- 桌面端视图（保持原逻辑与布局 100% 不变） -->
+  <div v-else class="p-4 md:p-6 lg:p-8 bg-background text-foreground">
     <h1 class="text-2xl font-semibold mb-6">{{ t('nav.dashboard') }}</h1>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:items-start">
 
-      <!-- Connection List -->
-      <div class="bg-card text-card-foreground shadow rounded-lg overflow-hidden border border-border min-h-[400px]">
-        <div class="px-4 py-3 border-b border-border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-          <h2 class="text-lg font-medium flex-shrink-0">{{ t('dashboard.connectionList', '连接列表') }} ({{ filteredAndSortedConnections.length }})</h2>
-          <div class="w-full sm:w-auto flex flex-wrap sm:flex-nowrap items-stretch sm:items-center space-y-2 sm:space-y-0 sm:space-x-2">
-            <!-- Search Input (Order adjusted for button placement) -->
-            <input
-              type="text"
-              v-model="searchQuery"
-              :placeholder="t('dashboard.searchConnectionsPlaceholder', '搜索连接...')"
-              class="h-8 px-3 py-1 text-sm border border-border rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary w-full sm:w-48"
-            />
-            <div class="flex items-center space-x-2"> <!-- Wrapper for existing controls -->
-             <!-- Tag Filter Dropdown -->
-             <select
+      <!-- ==================== Left: Connection List Card ==================== -->
+      <div
+        class="text-card-foreground rounded-2xl overflow-hidden border border-border/80 shadow-md flex flex-col min-h-[440px]"
+        style="background-color: var(--card-bg-color, var(--app-bg-color));"
+      >
+        <!-- 顶部工具栏 Toolbar -->
+        <div class="px-4 py-3.5 border-b border-border/70 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-header/40 backdrop-blur-xs flex-shrink-0">
+          <div class="flex items-center gap-2.5">
+            <div class="w-7 h-7 rounded-lg bg-primary/15 border border-primary/25 flex items-center justify-center text-primary text-xs">
+              <i class="fas fa-server"></i>
+            </div>
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm md:text-base font-bold text-foreground tracking-tight leading-none">
+                {{ t('dashboard.connectionList', '连接列表') }}
+              </h2>
+              <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-primary/15 text-primary border border-primary/20">
+                {{ filteredAndSortedConnections.length }}
+              </span>
+            </div>
+          </div>
+
+          <div class="w-full sm:w-auto flex flex-wrap sm:flex-nowrap items-stretch sm:items-center gap-2">
+            <!-- 搜索框 -->
+            <div class="relative w-full sm:w-44">
+              <i class="fas fa-search absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary text-xs pointer-events-none"></i>
+              <input
+                type="text"
+                v-model="searchQuery"
+                :placeholder="t('dashboard.searchConnectionsPlaceholder', '搜索连接...')"
+                class="h-8 pl-7 pr-2.5 text-xs border border-border/70 rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary w-full shadow-2xs transition-all"
+                style="background-color: var(--app-bg-color);"
+              />
+            </div>
+
+            <div class="flex items-center gap-2">
+              <!-- 标签筛选下拉 -->
+              <select
                 v-model="selectedTagId"
-                class="h-8 px-2 py-1 text-sm border border-border rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary appearance-none bg-no-repeat bg-right pr-8"
-                style="background-image: url('data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 16 16\'%3e%3cpath fill=\'none\' stroke=\'%236c757d\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M2 5l6 6 6-6\'/%3e%3c/svg%3e'); background-position: right 0.5rem center; background-size: 16px 12px;"
+                class="h-8 px-2.5 text-xs border border-border/70 rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 appearance-none bg-no-repeat bg-right pr-7 shadow-2xs cursor-pointer transition-all"
+                style="background-color: var(--app-bg-color); background-image: url('data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 16 16\'%3e%3cpath fill=\'none\' stroke=\'%236c757d\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M2 5l6 6 6-6\'/%3e%3c/svg%3e'); background-position: right 0.5rem center; background-size: 14px 10px;"
                 aria-label="Filter connections by tag"
                 :disabled="isLoadingTags"
               >
                 <option :value="null">{{ t('dashboard.filterTags.all', '所有标签') }}</option>
                 <option v-if="isLoadingTags" disabled>{{ t('common.loading') }}</option>
-                <!-- 修正 v-for 循环中的类型 -->
                 <option v-for="tag in (tags as TagInfo[])" :key="tag.id" :value="tag.id">
                   {{ tag.name }}
                 </option>
               </select>
 
-             <!-- Sort By Dropdown -->
-             <select
+              <!-- 排序下拉 -->
+              <select
                 v-model="localSortBy"
-                class="h-8 px-2 py-1 text-sm border border-border rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary appearance-none bg-no-repeat bg-right pr-8"
-                style="background-image: url('data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 16 16\'%3e%3cpath fill=\'none\' stroke=\'%236c757d\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M2 5l6 6 6-6\'/%3e%3c/svg%3e'); background-position: right 0.5rem center; background-size: 16px 12px;"
+                class="h-8 px-2.5 text-xs border border-border/70 rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 appearance-none bg-no-repeat bg-right pr-7 shadow-2xs cursor-pointer transition-all"
+                style="background-color: var(--app-bg-color); background-image: url('data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 16 16\'%3e%3cpath fill=\'none\' stroke=\'%236c757d\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M2 5l6 6 6-6\'/%3e%3c/svg%3e'); background-position: right 0.5rem center; background-size: 14px 10px;"
                 aria-label="Sort connections by"
               >
                 <option v-for="option in sortOptions" :key="option.value" :value="option.value">
@@ -330,88 +383,164 @@ const handleConnectionModified = async () => {
                 </option>
               </select>
 
-              <!-- Sort Order Button -->
+              <!-- 排序顺序切换按钮 -->
               <button
                 @click="toggleSortOrder"
-                class="h-8 px-1.5 py-1 border border-border rounded hover:bg-muted focus:outline-none focus:ring-1 focus:ring-primary flex items-center justify-center"
+                class="h-8 w-8 border border-border/70 rounded-xl text-text-secondary hover:text-foreground hover:bg-header/60 focus:outline-none focus:ring-2 focus:ring-primary/40 flex items-center justify-center transition-all shadow-2xs cursor-pointer"
+                style="background-color: var(--app-bg-color);"
                 :aria-label="isAscending ? t('common.sortAscending') : t('common.sortDescending')"
                 :title="isAscending ? t('common.sortAscending') : t('common.sortDescending')"
               >
-                <i :class="['fas', isAscending ? 'fa-arrow-up-a-z' : 'fa-arrow-down-z-a', 'w-4 h-4']"></i>
+                <i :class="['fas', isAscending ? 'fa-arrow-up-a-z' : 'fa-arrow-down-z-a', 'text-xs']"></i>
+              </button>
+
+              <!-- 新建连接按钮 -->
+              <button
+                @click="openAddConnectionForm"
+                :title="t('connections.addConnection', '新建连接')"
+                class="h-8 px-2.5 bg-primary text-white rounded-xl shadow-xs hover:bg-primary-hover active:scale-95 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all flex items-center gap-1.5 text-xs font-semibold cursor-pointer shrink-0"
+              >
+                <i class="fas fa-plus text-[10px]"></i>
+                <span class="hidden sm:inline">{{ t('connections.new', '新建') }}</span>
               </button>
             </div>
-            <!-- Add Connection Button -->
-            <button @click="openAddConnectionForm" title="Add Connection" class="h-8 w-8 bg-button rounded-md shadow-sm hover:bg-button-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition duration-150 ease-in-out flex items-center justify-center flex-shrink-0 ml-2 sm:ml-0">
-              <i class="fas fa-plus" style="color: white;"></i>
-            </button>
           </div>
         </div>
-        <div class="p-4">
-          <!-- Use filteredAndSortedConnections and check its length -->
-          <div v-if="isLoadingConnections && filteredAndSortedConnections.length === 0" class="text-center text-text-secondary">{{ t('common.loading') }}</div>
-          <ul v-else-if="filteredAndSortedConnections.length > 0" class="space-y-3">
-            <!-- Iterate over filteredAndSortedConnections -->
-            <li v-for="conn in filteredAndSortedConnections" :key="conn.id" class="flex items-center justify-between p-3 bg-header/50 border border-border/50 rounded transition duration-150 ease-in-out">
+
+        <!-- 中间内容下沉画布：深沉深黑基底 -->
+        <div
+          class="flex-1 p-4 overflow-y-auto space-y-3"
+          style="background-color: var(--app-bg-color);"
+        >
+          <div v-if="isLoadingConnections && filteredAndSortedConnections.length === 0" class="text-center text-text-secondary py-8">
+            <i class="fas fa-spinner fa-spin text-primary mr-2"></i>{{ t('common.loading') }}
+          </div>
+          <ul v-else-if="filteredAndSortedConnections.length > 0" class="space-y-2.5">
+            <li
+              v-for="conn in filteredAndSortedConnections"
+              :key="conn.id"
+              class="flex items-center justify-between p-3.5 rounded-xl transition-all duration-150 border shadow-xs"
+              :class="conn.background_color ? 'connection-colored-card' : 'border-border/70 hover:border-primary/40'"
+              :style="conn.background_color ? getConnectionCardStyle(conn.background_color) : { backgroundColor: 'var(--card-bg-color, var(--app-bg-color))' }"
+            >
               <div class="flex-grow mr-4 overflow-hidden">
-                <span class="font-medium block truncate flex items-center" :title="conn.name || ''">
-                  <i :class="['fas', conn.type === 'VNC' ? 'fa-plug' : (conn.type === 'RDP' ? 'fa-desktop' : 'fa-server'), 'mr-2 w-4 text-center text-text-secondary']"></i>
-                  <span>{{ conn.name || conn.host || t('connections.unnamedFallback', '未命名连接') }}</span>
+                <span class="font-semibold text-xs md:text-sm block truncate flex items-center" :title="conn.name || ''">
+                  <i
+                    :class="[
+                      'fas',
+                      conn.type === 'VNC' ? 'fa-plug' : (conn.type === 'RDP' ? 'fa-desktop' : 'fa-server'),
+                      'mr-2 w-4 text-center',
+                      conn.background_color ? '' : 'text-primary'
+                    ]"
+                    :style="conn.background_color ? { color: conn.background_color } : {}"
+                  ></i>
+                  <span class="text-foreground">{{ conn.name || conn.host || t('connections.unnamedFallback', '未命名连接') }}</span>
                 </span>
-                <span class="text-sm text-text-secondary block truncate" :title="`${conn.username}@${conn.host}:${conn.port}`">
+                <span class="text-xs text-text-secondary font-mono block truncate mt-0.5" :title="`${conn.username}@${conn.host}:${conn.port}`">
                   {{ conn.username }}@{{ conn.host }}:{{ conn.port }}
                 </span>
-                <span class="text-xs text-text-alt block mb-1"> <!-- Added margin-bottom -->
+                <span class="text-[11px] text-text-secondary/80 block mt-1">
                   {{ t('dashboard.lastConnected', '上次连接:') }} {{ formatRelativeTime(conn.last_connected_at) }}
                 </span>
-                <div v-if="getTagNames(conn.tag_ids).length > 0" class="flex flex-wrap gap-1 mt-1">
+                <div v-if="getTagNames(conn.tag_ids).length > 0" class="flex flex-wrap gap-1 mt-1.5">
                   <span
                     v-for="tagName in getTagNames(conn.tag_ids)"
                     :key="tagName"
-                    class="px-1.5 py-0.5 text-xs rounded bg-muted text-muted-foreground border border-border"
+                    class="px-2 py-0.5 text-[10px] rounded-lg border border-border/60 text-text-secondary font-medium"
+                    style="background-color: var(--app-bg-color);"
                   >
                     {{ tagName }}
                   </span>
                 </div>
               </div>
-              <div class="flex space-x-2 flex-shrink-0">
-                <button @click="openEditConnectionForm(conn)" class="px-3 py-1.5 bg-transparent text-foreground border border-border rounded-md shadow-sm hover:bg-border focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition duration-150 ease-in-out text-sm font-medium">
-                  <i class="fas fa-pencil-alt"></i>
+
+              <div class="flex items-center space-x-2 flex-shrink-0">
+                <button
+                  @click="openEditConnectionForm(conn)"
+                  class="h-7 w-7 rounded-lg text-text-secondary hover:text-foreground border border-border/70 hover:bg-header/70 flex items-center justify-center transition-all cursor-pointer shadow-2xs"
+                  style="background-color: var(--app-bg-color);"
+                  :title="t('common.edit', '编辑')"
+                >
+                  <i class="fas fa-pencil-alt text-xs"></i>
                 </button>
-                <button @click="connectTo(conn)" class="px-4 py-2 bg-button text-button-text rounded-md shadow-sm hover:bg-button-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition duration-150 ease-in-out text-sm font-medium"> <!-- Applied standard button style -->
-                  {{ t('connections.actions.connect') }}
+                <button
+                  @click="connectTo(conn)"
+                  class="h-7 px-3 bg-primary text-white rounded-lg shadow-xs hover:bg-primary-hover active:scale-95 transition-all text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <i class="fas fa-play text-[10px]"></i>
+                  <span>{{ t('connections.actions.connect', '连接') }}</span>
                 </button>
               </div>
             </li>
           </ul>
-          <!-- Adjust no connections message based on filtering and search -->
-          <div v-else-if="!isLoadingConnections && searchQuery && filteredAndSortedConnections.length === 0" class="text-center text-text-secondary">{{ t('dashboard.noConnectionsMatchSearch', '没有连接匹配搜索条件') }}</div>
-          <div v-else-if="!isLoadingConnections && selectedTagId !== null && filteredAndSortedConnections.length === 0" class="text-center text-text-secondary">{{ t('dashboard.noConnectionsWithTag', '该标签下没有连接记录') }}</div>
-          <div v-else class="text-center text-text-secondary">{{ t('dashboard.noConnections', '没有连接记录') }}</div>
+          <div v-else-if="!isLoadingConnections && searchQuery && filteredAndSortedConnections.length === 0" class="text-center text-text-secondary py-8 text-xs">
+            {{ t('dashboard.noConnectionsMatchSearch', '没有连接匹配搜索条件') }}
+          </div>
+          <div v-else-if="!isLoadingConnections && selectedTagId !== null && filteredAndSortedConnections.length === 0" class="text-center text-text-secondary py-8 text-xs">
+            {{ t('dashboard.noConnectionsWithTag', '该标签下没有连接记录') }}
+          </div>
+          <div v-else class="text-center text-text-secondary py-8 text-xs">
+            {{ t('dashboard.noConnections', '没有连接记录') }}
+          </div>
         </div>
       </div>
 
-      <!-- Recent Activity -->
-      <div class="bg-card text-card-foreground shadow rounded-lg overflow-hidden border border-border min-h-[400px]">
-        <div class="px-4 py-3 border-b border-border">
-          <h2 class="text-lg font-medium">{{ t('dashboard.recentActivity', '最近活动') }}</h2>
+      <!-- ==================== Right: Recent Activity Card ==================== -->
+      <div
+        class="text-card-foreground rounded-2xl overflow-hidden border border-border/80 shadow-md flex flex-col min-h-[440px]"
+        style="background-color: var(--card-bg-color, var(--app-bg-color));"
+      >
+        <!-- 顶部工具栏 Toolbar -->
+        <div class="px-4 py-3.5 border-b border-border/70 flex items-center justify-between bg-header/40 backdrop-blur-xs flex-shrink-0">
+          <div class="flex items-center gap-2.5">
+            <div class="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/25 flex items-center justify-center text-amber-500 text-xs">
+              <i class="fas fa-history"></i>
+            </div>
+            <h2 class="text-sm md:text-base font-bold text-foreground tracking-tight leading-none">
+              {{ t('dashboard.recentActivity', '最近活动') }}
+            </h2>
+          </div>
         </div>
-        <div class="p-4">
-          <!-- Loading State (Only show if loading AND no logs are displayed yet) -->
-          <div v-if="isLoadingLogs && recentAuditLogs.length === 0" class="text-center text-text-secondary">{{ t('common.loading') }}</div>
-          <ul v-else-if="recentAuditLogs.length > 0" class="space-y-3">
-            <li v-for="log in recentAuditLogs" :key="log.id" class="p-3 bg-header/50 border border-border/50 rounded"> <!-- Applied audit log item style -->
-              <div class="flex justify-between items-start mb-1">
-                <span class="font-medium text-sm" :class="{ 'text-error': isFailedAction(log.action_type) }">{{ getActionTranslation(log.action_type) }}</span>
-                <span class="text-xs text-text-alt flex-shrink-0 ml-2">{{ formatRelativeTime(log.timestamp) }}</span>
+
+        <!-- 中间内容下沉画布：深沉深黑基底 -->
+        <div
+          class="flex-1 p-4 overflow-y-auto space-y-2.5"
+          style="background-color: var(--app-bg-color);"
+        >
+          <div v-if="isLoadingLogs && recentAuditLogs.length === 0" class="text-center text-text-secondary py-8">
+            <i class="fas fa-spinner fa-spin text-primary mr-2"></i>{{ t('common.loading') }}
+          </div>
+          <ul v-else-if="recentAuditLogs.length > 0" class="space-y-2.5">
+            <li
+              v-for="log in recentAuditLogs"
+              :key="log.id"
+              class="p-3.5 rounded-xl border border-border/70 hover:border-border transition-all duration-150 shadow-xs"
+              style="background-color: var(--card-bg-color, var(--app-bg-color));"
+            >
+              <div class="flex justify-between items-start mb-1.5">
+                <span class="font-semibold text-xs md:text-sm" :class="isFailedAction(log.action_type) ? 'text-error' : 'text-foreground'">
+                  {{ getActionTranslation(log.action_type) }}
+                </span>
+                <span class="text-[11px] text-text-secondary flex-shrink-0 ml-2 font-mono">
+                  {{ formatRelativeTime(log.timestamp) }}
+                </span>
               </div>
-              <p class="text-sm text-text-secondary break-words">{{ log.details }}</p>
+              <p class="text-xs text-text-secondary break-words font-mono leading-relaxed">{{ log.details }}</p>
             </li>
           </ul>
-          <div v-else class="text-center text-text-secondary">{{ t('dashboard.noRecentActivity', '没有最近活动记录') }}</div>
+          <div v-else class="text-center text-text-secondary py-8 text-xs">
+            {{ t('dashboard.noRecentActivity', '没有最近活动记录') }}
+          </div>
         </div>
-        <div class="px-4 py-3 border-t border-border text-right">
-          <RouterLink :to="{ name: 'AuditLogs' }" class="text-sm text-link hover:text-link-hover hover:underline">
-            {{ t('dashboard.viewFullAuditLog', '查看完整审计日志') }}
+
+        <!-- 底部 Footer 操作栏 -->
+        <div class="px-4 py-3 border-t border-border/70 bg-header/40 backdrop-blur-xs flex items-center justify-end flex-shrink-0">
+          <RouterLink
+            :to="{ name: 'AuditLogs' }"
+            class="text-xs font-semibold text-primary hover:text-primary-hover flex items-center gap-1.5 transition-colors group cursor-pointer"
+          >
+            <span>{{ t('dashboard.viewFullAuditLog', '查看完整审计日志') }}</span>
+            <i class="fas fa-arrow-right text-[10px] transform group-hover:translate-x-0.5 transition-transform"></i>
           </RouterLink>
         </div>
       </div>
@@ -421,9 +550,16 @@ const handleConnectionModified = async () => {
     <AddConnectionForm
       v-if="showAddEditConnectionForm"
       :connectionToEdit="connectionToEdit"
+      :is-mobile="false"
       @close="handleFormClose"
       @connection-added="handleConnectionModified"
       @connection-updated="handleConnectionModified"
     />
   </div>
 </template>
+<style scoped>
+.connection-colored-card:hover {
+  background-color: var(--conn-card-hover-bg, var(--conn-card-bg)) !important;
+  border-color: var(--conn-card-border) !important;
+}
+</style>

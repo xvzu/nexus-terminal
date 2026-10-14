@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, nextTick, Teleport } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { PRESET_COLORS, generateRandomColor, hexToRgba } from '../utils/colorUtils';
+import { isRemoteDesktopSupported } from '../utils/platform';
 
 // Define Props. formData is expected to be a reactive object from the parent composable.
 const props = defineProps<{
@@ -9,6 +11,8 @@ const props = defineProps<{
     type: 'SSH' | 'RDP' | 'VNC';
     host: string;
     port: number;
+    custom_background_color?: boolean;
+    background_color?: string;
   };
 }>();
 
@@ -19,6 +23,24 @@ const showHostTooltip = ref(false);
 const hostTooltipStyle = ref({});
 const hostIconRef = ref<HTMLElement | null>(null);
 const hostTooltipContentRef = ref<HTMLElement | null>(null);
+
+// 切换背景色开关
+const toggleCustomColor = () => {
+  props.formData.custom_background_color = !props.formData.custom_background_color;
+  if (props.formData.custom_background_color && !props.formData.background_color) {
+    props.formData.background_color = generateRandomColor();
+  }
+};
+
+// 随机生成全新颜色 (全光谱 HSL 算法随机)
+const handleRandomColor = () => {
+  props.formData.background_color = generateRandomColor();
+};
+
+// 选择预设颜色
+const selectPresetColor = (color: string) => {
+  props.formData.background_color = color;
+};
 
 const handleHostIconMouseEnter = async () => {
   showHostTooltip.value = true;
@@ -61,63 +83,182 @@ const handleHostIconMouseLeave = () => {
       v-if="showHostTooltip"
       ref="hostTooltipContentRef"
       :style="hostTooltipStyle"
-      class="fixed w-max max-w-xs p-2 text-xs text-white bg-gray-800 rounded shadow-lg z-[1000] whitespace-pre-wrap pointer-events-none"
+      class="fixed w-max max-w-xs p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-[99999] whitespace-pre-wrap pointer-events-none"
       role="tooltip"
     >
       {{ t('connections.form.hostTooltip', '支持 IP 范围, 例如 192.168.1.10~192.168.1.15 (仅限添加模式)') }}
     </div>
   </Teleport>
-  <!-- Basic Info Section -->
-  <div class="space-y-4 p-4 border border-border rounded-md bg-header/30">
-    <h4 class="text-base font-semibold mb-3 pb-2 border-b border-border/50">{{ t('connections.form.sectionBasic', '基本信息') }}</h4>
-    <div>
-      <label for="conn-name" class="block text-sm font-medium text-text-secondary mb-1">{{ t('connections.form.name') }} ({{ t('connections.form.optional') }})</label>
-      <input type="text" id="conn-name" v-model="props.formData.name"
-             class="w-full px-3 py-2 border border-border rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary" />
+
+  <!-- 基础配置卡片：立体卡片 -->
+  <div
+    class="rounded-2xl border border-border/70 bg-muted/15 p-4 md:p-5 space-y-4 shadow-sm"
+  >
+    <div class="flex items-center justify-between pb-2.5 border-b border-border/50">
+      <div class="flex items-center gap-2">
+        <div class="w-6 h-6 rounded-md bg-primary/15 text-primary flex items-center justify-center text-xs">
+          <i class="fas fa-globe"></i>
+        </div>
+        <h4 class="text-xs font-semibold text-foreground tracking-wide uppercase">{{ t('connections.form.sectionBasic', '基本信息') }}</h4>
+      </div>
     </div>
-    <!-- Connection Type -->
+
+    <!-- 连接名称 -->
     <div>
-      <label class="block text-sm font-medium text-text-secondary mb-1">{{ t('connections.form.connectionType', '连接类型') }}</label>
-      <div class="flex rounded-md shadow-sm">
-        <button type="button"
-                @click="props.formData.type = 'SSH'"
-                :class="['flex-1 px-3 py-2 border border-border text-sm font-medium focus:outline-none',
-                         props.formData.type === 'SSH' ? 'bg-primary text-white' : 'bg-background text-foreground hover:bg-border',
-                         'rounded-l-md']">
-          {{ t('connections.form.typeSsh', 'SSH') }}
+      <label for="conn-name" class="block text-xs font-medium text-text-secondary mb-1.5">{{ t('connections.form.name') }}</label>
+      <input
+        type="text"
+        id="conn-name"
+        v-model="props.formData.name"
+        :placeholder="t('connections.form.namePlaceholder', '如: 生产服务器 / 个人 VPS')"
+        class="w-full px-3 py-2 text-xs md:text-sm border border-border/70 rounded-xl text-foreground bg-input focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all shadow-2xs"
+      />
+    </div>
+
+    <!-- 连接类型 -->
+    <div>
+      <label class="block text-xs font-medium text-text-secondary mb-1.5">{{ t('connections.form.connectionType', '连接类型') }}</label>
+      <div
+        class="grid grid-cols-3 gap-1.5 p-1 rounded-xl border border-border/70 bg-input"
+      >
+        <button
+          type="button"
+          @click="props.formData.type = 'SSH'"
+          class="px-3 py-1.5 text-xs font-medium rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          :class="props.formData.type === 'SSH' ? 'bg-primary text-white shadow-xs font-semibold' : 'text-text-secondary hover:text-foreground hover:bg-muted/60'"
+        >
+          <i class="fas fa-terminal text-[10px]"></i>
+          <span>SSH</span>
         </button>
-        <button type="button"
-                @click="props.formData.type = 'RDP'"
-                :class="['flex-1 px-3 py-2 border-t border-b border-r border-border text-sm font-medium focus:outline-none -ml-px',
-                         props.formData.type === 'RDP' ? 'bg-primary text-white' : 'bg-background text-foreground hover:bg-border']">
-          {{ t('connections.form.typeRdp', 'RDP') }}
+        <button
+          v-if="isRemoteDesktopSupported()"
+          type="button"
+          @click="props.formData.type = 'RDP'"
+          class="px-3 py-1.5 text-xs font-medium rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          :class="props.formData.type === 'RDP' ? 'bg-primary text-white shadow-xs font-semibold' : 'text-text-secondary hover:text-foreground hover:bg-muted/60'"
+        >
+          <i class="fas fa-desktop text-[10px]"></i>
+          <span>RDP</span>
         </button>
-        <button type="button"
-                @click="props.formData.type = 'VNC'"
-                :class="['flex-1 px-3 py-2 border border-border text-sm font-medium focus:outline-none -ml-px',
-                         props.formData.type === 'VNC' ? 'bg-primary text-white' : 'bg-background text-foreground hover:bg-border',
-                         'rounded-r-md']">
-          {{ t('connections.form.typeVnc', 'VNC') }}
+        <button
+          v-if="isRemoteDesktopSupported()"
+          type="button"
+          @click="props.formData.type = 'VNC'"
+          class="px-3 py-1.5 text-xs font-medium rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          :class="props.formData.type === 'VNC' ? 'bg-primary text-white shadow-xs font-semibold' : 'text-text-secondary hover:text-foreground hover:bg-muted/60'"
+        >
+          <i class="fas fa-plug text-[10px]"></i>
+          <span>VNC</span>
         </button>
       </div>
     </div>
-    <!-- Host and Port Row -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <div class="md:col-span-2">
-        <label for="conn-host" class="block text-sm font-medium text-text-secondary mb-1">
+
+    <!-- 主机与端口 -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div class="md:col-span-3">
+        <label for="conn-host" class="block text-xs font-medium text-text-secondary mb-1.5">
           {{ t('connections.form.host') }}
-          <span class="relative ml-1" @mouseenter="handleHostIconMouseEnter" @mouseleave="handleHostIconMouseLeave">
-            <i ref="hostIconRef" class="fas fa-exclamation-circle text-text-secondary cursor-help"></i>
+          <span class="relative ml-1 text-text-secondary/70 hover:text-primary cursor-help" @mouseenter="handleHostIconMouseEnter" @mouseleave="handleHostIconMouseLeave">
+            <i ref="hostIconRef" class="fas fa-question-circle text-[11px]"></i>
           </span>
         </label>
-        <input type="text" id="conn-host" v-model="props.formData.host" required
-               class="w-full px-3 py-2 border border-border rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary" />
+        <input
+          type="text"
+          id="conn-host"
+          v-model="props.formData.host"
+          required
+          placeholder="192.168.1.100 或 example.com"
+          class="w-full px-3 py-2 text-xs md:text-sm font-mono border border-border/70 rounded-xl text-foreground bg-input focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all shadow-2xs"
+        />
       </div>
       <div>
-        <label for="conn-port" class="block text-sm font-medium text-text-secondary mb-1">{{ t('connections.form.port') }}</label>
-        <input type="number" id="conn-port" v-model.number="props.formData.port" required min="1" max="65535"
-               class="w-full px-3 py-2 border border-border rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary" />
+        <label for="conn-port" class="block text-xs font-medium text-text-secondary mb-1.5">{{ t('connections.form.port') }}</label>
+        <input
+          type="number"
+          id="conn-port"
+          v-model.number="props.formData.port"
+          required
+          min="1"
+          max="65535"
+          class="w-full px-3 py-2 text-xs md:text-sm font-mono border border-border/70 rounded-xl text-foreground bg-input focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all shadow-2xs"
+        />
+      </div>
+    </div>
+
+    <!-- 卡片背景颜色配置 (极简无冗余废话) -->
+    <div class="pt-3 border-t border-border/40">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i class="fas fa-palette text-text-secondary text-xs"></i>
+          <span class="text-xs font-medium text-foreground">{{ t('connections.form.customBackgroundColor', '卡片背景颜色') }}</span>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          :aria-checked="props.formData.custom_background_color"
+          @click="toggleCustomColor"
+          class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+          :class="props.formData.custom_background_color ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-700'"
+        >
+          <span
+            class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out"
+            :class="props.formData.custom_background_color ? 'translate-x-4' : 'translate-x-0'"
+          />
+        </button>
+      </div>
+
+      <!-- 展开的颜色选择 -->
+      <div
+        v-if="props.formData.custom_background_color"
+        class="mt-3 space-y-2.5 p-3 border border-border/70 rounded-xl bg-input"
+      >
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-semibold text-text-secondary">{{ t('connections.form.selectColor', '选择颜色') }}</span>
+          <button
+            type="button"
+            @click="handleRandomColor"
+            class="px-2 py-0.5 text-[11px] font-medium rounded-lg bg-muted/60 hover:bg-muted/90 text-foreground border border-border/70 flex items-center gap-1 transition-all active:scale-95 cursor-pointer shadow-2xs"
+          >
+            <i class="fas fa-dice text-primary text-[10px]"></i>
+            <span>{{ t('connections.form.randomColor', '随机') }}</span>
+          </button>
+        </div>
+
+        <!-- 预设色板 -->
+        <div class="flex items-center flex-wrap gap-1.5 pt-0.5">
+          <button
+            v-for="color in PRESET_COLORS"
+            :key="color"
+            type="button"
+            @click="selectPresetColor(color)"
+            class="w-6 h-6 rounded-full flex items-center justify-center transition-transform hover:scale-110 focus:outline-none relative shadow-2xs cursor-pointer"
+            :style="{ backgroundColor: color }"
+            :class="props.formData.background_color?.toLowerCase() === color.toLowerCase() ? 'ring-2 ring-primary ring-offset-2 ring-offset-background scale-105' : ''"
+            :title="color"
+          >
+            <i
+              v-if="props.formData.background_color?.toLowerCase() === color.toLowerCase()"
+              class="fas fa-check text-[10px] text-white drop-shadow-sm"
+            ></i>
+          </button>
+        </div>
+
+        <!-- 原生颜色拾取与十六进制 -->
+        <div class="flex items-center gap-2 pt-1">
+          <input
+            type="color"
+            id="conn-color-native"
+            v-model="props.formData.background_color"
+            class="w-7 h-7 rounded-lg cursor-pointer border border-border/70 bg-transparent p-0.5"
+          />
+          <input
+            type="text"
+            v-model="props.formData.background_color"
+            placeholder="#3b82f6"
+            class="flex-1 px-2.5 py-1 text-xs font-mono border border-border/60 rounded-xl text-foreground bg-background uppercase focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
       </div>
     </div>
   </div>
-</template>
+</template>

@@ -1,4 +1,4 @@
-FROM node:20 AS builder
+FROM --platform=$BUILDPLATFORM node:20 AS builder
 
 WORKDIR /app
 
@@ -30,20 +30,19 @@ RUN apk add --no-cache --virtual .build-deps python3 py3-setuptools make g++
 WORKDIR /app
 
 
-COPY --from=builder /app/packages/backend/dist ./dist
-
-COPY --from=builder /app/packages/backend/src/locales ./dist/locales
-COPY --from=builder /app/packages/backend/html-presets ./html-presets
-
 COPY packages/backend/package.json ./package.json
 COPY package-lock.json ./package-lock.json
-RUN npm install --omit=dev --no-audit --no-fund --loglevel=error
+RUN npm install --omit=dev
 
+COPY --from=builder /app/packages/backend/dist ./dist
+COPY --from=builder /app/packages/backend/src/locales ./dist/locales
+COPY --from=builder /app/packages/backend/html-presets ./html-presets
 
 RUN apk del .build-deps
 
 
-EXPOSE 3001
 
+ENV NEXUS_DATA_DIR=/app/data
+EXPOSE 3001
 
 CMD ["node", "dist/index.js"]

@@ -7,6 +7,7 @@ import { useUiNotificationsStore } from './uiNotifications.store';
 export interface QuickCommandTag {
     id: number;
     name: string;
+    background_color?: string | null;
     created_at: number;
     updated_at: number;
 }
@@ -67,12 +68,15 @@ export const useQuickCommandTagsStore = defineStore('quickCommandTags', () => {
     }
 
     // 添加新快捷指令标签 (添加后清除缓存)
-    async function addTag(name: string): Promise<QuickCommandTag | null> {
+    async function addTag(name: string, backgroundColor?: string | null): Promise<QuickCommandTag | null> {
         isLoading.value = true;
         error.value = null;
         try {
             // 使用新的 API 端点
-            const response = await apiClient.post<{ message: string, tag: QuickCommandTag }>('/quick-command-tags', { name });
+            const response = await apiClient.post<{ message: string, tag: QuickCommandTag }>('/quick-command-tags', {
+                name,
+                background_color: backgroundColor || null
+            });
             const newTag = response.data.tag;
             localStorage.removeItem('quickCommandTagsCache'); // 清除缓存
             await fetchTags(); // 重新获取以更新列表
@@ -91,12 +95,15 @@ export const useQuickCommandTagsStore = defineStore('quickCommandTags', () => {
     }
 
     // 更新快捷指令标签
-    async function updateTag(id: number, name: string): Promise<boolean> {
+    async function updateTag(id: number, name?: string, backgroundColor?: string | null): Promise<boolean> {
         isLoading.value = true;
         error.value = null;
         try {
-            // 使用新的 API 端点
-            await apiClient.put(`/quick-command-tags/${id}`, { name });
+            const payload: Record<string, any> = {};
+            if (typeof name !== 'undefined') payload.name = name;
+            if (typeof backgroundColor !== 'undefined') payload.background_color = backgroundColor;
+
+            await apiClient.put(`/quick-command-tags/${id}`, payload);
             localStorage.removeItem('quickCommandTagsCache');
             await fetchTags();
             uiNotificationsStore.showSuccess('快捷指令标签已更新');
@@ -114,15 +121,17 @@ export const useQuickCommandTagsStore = defineStore('quickCommandTags', () => {
     }
 
     // 删除快捷指令标签
-    async function deleteTag(id: number): Promise<boolean> {
+    async function deleteTag(id: number, deleteCommands: boolean = false): Promise<boolean> {
         isLoading.value = true;
         error.value = null;
         try {
-            // 使用新的 API 端点
-            await apiClient.delete(`/quick-command-tags/${id}`);
+            // 使用新的 API 端点，支持带参删除指令
+            await apiClient.delete(`/quick-command-tags/${id}`, {
+                params: { deleteCommands }
+            });
             localStorage.removeItem('quickCommandTagsCache');
             await fetchTags();
-            uiNotificationsStore.showSuccess('快捷指令标签已删除');
+            uiNotificationsStore.showSuccess(deleteCommands ? '快捷指令分组及其中指令已删除' : '快捷指令标签已删除');
             return true;
         } catch (err: any) {
             console.error('[QuickCmdTagStore] Failed to delete tag:', err);
@@ -138,11 +147,21 @@ export const useQuickCommandTagsStore = defineStore('quickCommandTags', () => {
 
     return {
         tags,
+        folders: tags, // 文件夹语义别名
         isLoading,
         error,
         fetchTags,
+        fetchFolders: fetchTags,
         addTag,
+        createFolder: addTag,
         updateTag,
+        renameFolder: updateTag,
+        updateFolder: updateTag,
+        updateFolderColor: (id: number, color: string | null) => updateTag(id, undefined, color),
         deleteTag,
+        deleteFolder: deleteTag,
     };
 });
+
+// 快捷指令文件夹信息类型别名
+export type QuickCommandFolder = QuickCommandTag;

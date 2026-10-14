@@ -7,6 +7,8 @@ import { exportConnectionsAsEncryptedZip } from '../services/import-export.servi
 import { UpdateSidebarConfigDto, UpdateCaptchaSettingsDto, CaptchaSettings } from '../types/settings.types'; 
 import { AppearanceSettings, UpdateAppearanceDto } from '../types/appearance.types';
 import { getAppearanceSettings, updateAppearanceSettings as updateAppearanceSettingsInRepo } from '../appearance/appearance.repository';
+import { getServerSyncApiKey } from '../sync/sync.middleware';
+import { settingsRepository } from './settings.repository';
 import i18next from '../i18n'; 
 
 const auditLogService = new AuditLogService();
@@ -94,7 +96,17 @@ export const settingsController = {
           'terminalScrollbackLimit', // 终端回滚行数键
           'fileManagerShowDeleteConfirmation', // 文件管理器删除确认键
           'terminalEnableRightClickPaste', // 终端右键粘贴键
-          'showStatusMonitorIpAddress' // 添加状态监视器IP显示键 (与服务层和前端统一)
+          'terminalRightClickBehavior', // 终端右键行为交互键
+          'terminalContextMenuItems', // 终端右键菜单项配置键
+          'showStatusMonitorIpAddress',
+          'fileManagerDoubleClickToOpen',
+          'fileEditorModalWidth', // 文本编辑器弹窗宽度键
+          'fileEditorModalHeight', // 文本编辑器弹窗高度键
+          'terminalNoWrap', // 终端不换行设置键
+          'markdownDefaultViewMode',
+          'markdownDefaultViewModeMobile',
+          'componentInstanceStates', // 组件实例状态设置键
+          'rememberLastRoute' // 记住上次停留页面设置键
       ];
       const filteredSettings: Record<string, string> = {};
       for (const key in settingsToUpdate) {
@@ -181,7 +193,8 @@ export const settingsController = {
   */
  async getNavBarVisibility(req: Request, res: Response): Promise<void> {
    try {
-     const isVisible = await settingsService.getNavBarVisibility();
+     const platform = typeof req.query.platform === 'string' ? req.query.platform : undefined;
+     const isVisible = await settingsService.getNavBarVisibility(platform);
      res.json({ visible: isVisible });
    } catch (error: any) {
      console.error('[控制器] 获取导航栏可见性时出错:', error);
@@ -194,7 +207,7 @@ export const settingsController = {
   */
  async setNavBarVisibility(req: Request, res: Response): Promise<void> {
    try {
-     const { visible } = req.body;
+     const { visible, platform } = req.body;
      console.log('[控制器] 请求体 visible:', visible);
 
      if (typeof visible !== 'boolean') {
@@ -204,7 +217,7 @@ export const settingsController = {
      }
 
      
-     await settingsService.setNavBarVisibility(visible);
+     await settingsService.setNavBarVisibility(visible, typeof platform === 'string' ? platform : undefined);
      
 
 
@@ -585,6 +598,84 @@ async setCaptchaConfig(req: Request, res: Response): Promise<void> {
          res.status(500).json({ message: i18next.t('error.exportFailedGeneric'), error: error.message });
      }
    }
- } // <-- No comma after the last method if it's truly the last one
+ },
+/**
+   * 获取所有组件实例状态
+   */
+  async getComponentInstanceStates(req: Request, res: Response): Promise<void> {
+    try {
+      const states = await settingsService.getComponentInstanceStates();
+      res.json(states);
+    } catch (error: any) {
+      console.error('[控制器] 获取组件实例状态失败:', error);
+      res.status(500).json({ message: '获取组件状态失败', error: error.message });
+    }
+  },
 
+  /**
+   * 局部更新或保存组件实例状态
+   */
+  async updateComponentInstanceStates(req: Request, res: Response): Promise<void> {
+    try {
+      const updates = req.body;
+      if (!updates || typeof updates !== 'object') {
+        res.status(400).json({ message: '无效的更新数据，应为对象' });
+        return;
+      }
+      const result = await settingsService.updateComponentInstanceStates(updates);
+      res.json(result);
+    } catch (error: any) {
+      console.error('[控制器] 更新组件实例状态失败:', error);
+      res.status(500).json({ message: '更新组件状态失败', error: error.message });
+    }
+  },
+
+  /**
+   * 清理指定的不存在/孤立组件实例存储项
+   */
+  async cleanupComponentInstanceStates(req: Request, res: Response): Promise<void> {
+    try {
+      const { keysToDelete } = req.body;
+      if (!Array.isArray(keysToDelete)) {
+        res.status(400).json({ message: 'keysToDelete 应为数组' });
+        return;
+      }
+      const result = await settingsService.removeComponentInstanceStates(keysToDelete);
+      res.json(result);
+    } catch (error: any) {
+      console.error('[控制器] 清理组件实例状态失败:', error);
+      res.status(500).json({ message: '清理组件状态失败', error: error.message });
+    }
+  },
+
+  /**
+   * 获取当前云端服务端的同步 API Key (完全存库)
+   */
+  async getSyncApiKey(req: Request, res: Response): Promise<void> {
+    try {
+      const apiKey = await getServerSyncApiKey();
+      res.json({ success: true, apiKey });
+    } catch (error: any) {
+      console.error('获取同步 API Key 时出错:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  /**
+   * 更新云端服务端的同步 API Key 到数据库 settings 表
+   */
+  async setSyncApiKey(req: Request, res: Response): Promise<void> {
+    try {
+      const { apiKey } = req.body;
+      if (!apiKey || typeof apiKey !== 'string' || apiKey.trim() === '') {
+        res.status(400).json({ success: false, error: 'API Key 不能为空' });
+        return;
+      }
+      await settingsRepository.setSetting('syncApiKey', apiKey.trim());
+      res.json({ success: true, message: '同步 API Key 已成功保存至数据库' });
+    } catch (error: any) {
+      console.error('更新同步 API Key 时出错:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
 };

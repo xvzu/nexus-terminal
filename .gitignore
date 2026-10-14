@@ -42,7 +42,7 @@ build/Release
 node_modules/
 jspm_packages/
 scripts/
-!scripts/setup-docker-ipv6.sh
+!packages/desktop/scripts/
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
@@ -90,6 +90,7 @@ out
 # Nuxt.js build / generate output
 .nuxt
 dist
+dist-bundle
 
 # Gatsby files
 .cache/
@@ -138,8 +139,7 @@ dist
 /packages/backend/uploads/backgrounds
 /temp_iterm_schemes
 /packages/backend/sessions
-/data/*
-!/data/.gitkeep
+/data
 
 # Editor directories
 .idea/
@@ -161,3 +161,24 @@ dist-scripts/
 /packages/backend/data
 electron-app/node_modules/
 electron-app/dist_electron/
+
+
+# Documentation notes and progress tracking (Local only)
+/doc/DEVELOPMENT.md
+/doc/PROJECT_PROGRESS.md
+/doc/architecture/
+/doc/api/
+activeContext.md
+TASK_PLAN.md
+
+# Desktop app build and packaging artifacts
+dist-desktop/
+packages/desktop/node_modules/
+packages/desktop/src-tauri/target/
+packages/desktop/src-tauri/binaries/
+packages/desktop/src-tauri/resources/
+packages/desktop/src-tauri/gen/
+packages/backend/public/
+packages/backend/.env
+packages/backend/src/sync/__test_e2e_sync.ts
+.env

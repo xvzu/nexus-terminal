@@ -1,5 +1,5 @@
 import { ref, watch } from 'vue';
-import { useSettingsStore } from '../../stores/settings.store';
+import { useSettingsStore, type TerminalRightClickBehavior, type TerminalContextMenuSettings } from '../../stores/settings.store';
 import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 
@@ -17,10 +17,62 @@ export function useWorkspaceSettings() {
     showQuickCommandTagsBoolean,
     terminalScrollbackLimitNumber,
     fileManagerShowDeleteConfirmationBoolean,
+    fileManagerDoubleClickToOpenBoolean,
     terminalEnableRightClickPasteBoolean,
+    terminalRightClickBehaviorString,
+    terminalContextMenuItemsObject,
+    terminalNoWrapBoolean,
     showPopupFileManagerBoolean, 
     statusMonitorShowIpBoolean,
+    markdownDefaultViewModeString,
+    markdownDefaultViewModeMobileString,
   } = storeToRefs(settingsStore);
+
+  // --- Markdown Default View Mode (Desktop) ---
+  const markdownDefaultViewModeLocal = ref<'preview' | 'split' | 'edit'>('split');
+  const markdownDefaultViewModeLoading = ref(false);
+  const markdownDefaultViewModeMessage = ref('');
+  const markdownDefaultViewModeSuccess = ref(false);
+
+  const handleUpdateMarkdownDefaultViewMode = async () => {
+    markdownDefaultViewModeLoading.value = true;
+    markdownDefaultViewModeMessage.value = '';
+    markdownDefaultViewModeSuccess.value = false;
+    try {
+      await settingsStore.updateMarkdownDefaultViewMode(markdownDefaultViewModeLocal.value);
+      markdownDefaultViewModeMessage.value = t('common.saved');
+      markdownDefaultViewModeSuccess.value = true;
+    } catch (error: any) {
+      console.error('更新 Markdown 默认视图模式 (桌面端) 失败:', error);
+      markdownDefaultViewModeMessage.value = error.message || t('common.saveFailed');
+      markdownDefaultViewModeSuccess.value = false;
+    } finally {
+      markdownDefaultViewModeLoading.value = false;
+    }
+  };
+
+  // --- Markdown Default View Mode (Mobile) ---
+  const markdownDefaultViewModeMobileLocal = ref<'preview' | 'split' | 'edit'>('preview');
+  const markdownDefaultViewModeMobileLoading = ref(false);
+  const markdownDefaultViewModeMobileMessage = ref('');
+  const markdownDefaultViewModeMobileSuccess = ref(false);
+
+  const handleUpdateMarkdownDefaultViewModeMobile = async () => {
+    markdownDefaultViewModeMobileLoading.value = true;
+    markdownDefaultViewModeMobileMessage.value = '';
+    markdownDefaultViewModeMobileSuccess.value = false;
+    try {
+      await settingsStore.updateMarkdownDefaultViewModeMobile(markdownDefaultViewModeMobileLocal.value);
+      markdownDefaultViewModeMobileMessage.value = t('common.saved');
+      markdownDefaultViewModeSuccess.value = true;
+    } catch (error: any) {
+      console.error('更新 Markdown 默认视图模式 (移动端) 失败:', error);
+      markdownDefaultViewModeMobileMessage.value = error.message || t('common.saveFailed');
+      markdownDefaultViewModeMobileSuccess.value = false;
+    } finally {
+      markdownDefaultViewModeMobileLoading.value = false;
+    }
+  };
 
   // --- Popup Editor ---
   const popupEditorEnabled = ref(true);
@@ -239,6 +291,54 @@ export function useWorkspaceSettings() {
     }
   };
 
+  // --- File Manager Double Click to Open ---
+  const fileManagerDoubleClickToOpenLocal = ref(false);
+  const fileManagerDoubleClickToOpenLoading = ref(false);
+  const fileManagerDoubleClickToOpenMessage = ref('');
+  const fileManagerDoubleClickToOpenSuccess = ref(false);
+
+  const handleUpdateFileManagerDoubleClickToOpen = async () => {
+    fileManagerDoubleClickToOpenLoading.value = true;
+    fileManagerDoubleClickToOpenMessage.value = '';
+    fileManagerDoubleClickToOpenSuccess.value = false;
+    try {
+      const valueToSave = fileManagerDoubleClickToOpenLocal.value ? 'true' : 'false';
+      await settingsStore.updateSetting('fileManagerDoubleClickToOpen', valueToSave);
+      fileManagerDoubleClickToOpenMessage.value = t('settings.workspace.fileManagerDoubleClickToOpenSuccess', '双击打开文件/文件夹设置已保存。');
+      fileManagerDoubleClickToOpenSuccess.value = true;
+    } catch (error: any) {
+      console.error('更新双击打开设置失败:', error);
+      fileManagerDoubleClickToOpenMessage.value = error.message || t('settings.workspace.fileManagerDoubleClickToOpenError', '保存双击打开文件/文件夹设置失败。');
+      fileManagerDoubleClickToOpenSuccess.value = false;
+    } finally {
+      fileManagerDoubleClickToOpenLoading.value = false;
+    }
+  };
+
+  // --- Terminal No Wrap ---
+  const terminalNoWrapLocal = ref(false);
+  const terminalNoWrapLoading = ref(false);
+  const terminalNoWrapMessage = ref('');
+  const terminalNoWrapSuccess = ref(false);
+
+  const handleUpdateTerminalNoWrapSetting = async () => {
+    terminalNoWrapLoading.value = true;
+    terminalNoWrapMessage.value = '';
+    terminalNoWrapSuccess.value = false;
+    try {
+      const valueToSave = terminalNoWrapLocal.value ? 'true' : 'false';
+      await settingsStore.updateSetting('terminalNoWrap', valueToSave);
+      terminalNoWrapMessage.value = t('settings.workspace.terminalNoWrapSuccess', '终端不换行设置已保存。');
+      terminalNoWrapSuccess.value = true;
+    } catch (error: any) {
+      console.error('更新终端不换行设置失败:', error);
+      terminalNoWrapMessage.value = error.message || t('settings.workspace.terminalNoWrapError', '保存终端不换行设置失败。');
+      terminalNoWrapSuccess.value = false;
+    } finally {
+      terminalNoWrapLoading.value = false;
+    }
+  };
+
   // --- Terminal Right Click Paste ---
   const terminalEnableRightClickPasteLocal = ref(true);
   const terminalEnableRightClickPasteLoading = ref(false);
@@ -260,6 +360,58 @@ export function useWorkspaceSettings() {
       terminalEnableRightClickPasteSuccess.value = false;
     } finally {
       terminalEnableRightClickPasteLoading.value = false;
+    }
+  };
+
+  // --- Terminal Right Click Behavior ---
+  const terminalRightClickBehaviorLocal = ref<TerminalRightClickBehavior>('contextMenu');
+  const terminalRightClickBehaviorLoading = ref(false);
+  const terminalRightClickBehaviorMessage = ref('');
+  const terminalRightClickBehaviorSuccess = ref(false);
+
+  const handleUpdateTerminalRightClickBehavior = async () => {
+    terminalRightClickBehaviorLoading.value = true;
+    terminalRightClickBehaviorMessage.value = '';
+    terminalRightClickBehaviorSuccess.value = false;
+    try {
+      await settingsStore.updateTerminalRightClickBehavior(terminalRightClickBehaviorLocal.value);
+      terminalRightClickBehaviorMessage.value = t('common.saved', '已保存');
+      terminalRightClickBehaviorSuccess.value = true;
+    } catch (error: any) {
+      console.error('更新终端右键行为设置失败:', error);
+      terminalRightClickBehaviorMessage.value = error.message || t('common.saveFailed', '保存失败');
+      terminalRightClickBehaviorSuccess.value = false;
+    } finally {
+      terminalRightClickBehaviorLoading.value = false;
+    }
+  };
+
+  // --- Terminal Context Menu Items ---
+  const terminalContextMenuItemsLocal = ref<TerminalContextMenuSettings>({
+    copy: true,
+    paste: true,
+    openPath: true,
+    openFile: true,
+    saveQuickCommand: true,
+  });
+  const terminalContextMenuItemsLoading = ref(false);
+  const terminalContextMenuItemsMessage = ref('');
+  const terminalContextMenuItemsSuccess = ref(false);
+
+  const handleUpdateTerminalContextMenuItems = async () => {
+    terminalContextMenuItemsLoading.value = true;
+    terminalContextMenuItemsMessage.value = '';
+    terminalContextMenuItemsSuccess.value = false;
+    try {
+      await settingsStore.updateTerminalContextMenuItems(terminalContextMenuItemsLocal.value);
+      terminalContextMenuItemsMessage.value = t('common.saved', '已保存');
+      terminalContextMenuItemsSuccess.value = true;
+    } catch (error: any) {
+      console.error('更新终端右键菜单项配置失败:', error);
+      terminalContextMenuItemsMessage.value = error.message || t('common.saveFailed', '保存失败');
+      terminalContextMenuItemsSuccess.value = false;
+    } finally {
+      terminalContextMenuItemsLoading.value = false;
     }
   };
 
@@ -321,9 +473,15 @@ export function useWorkspaceSettings() {
   watch(showQuickCommandTagsBoolean, (newValue) => { showQuickCommandTagsLocal.value = newValue; }, { immediate: true });
   watch(terminalScrollbackLimitNumber, (newValue) => { terminalScrollbackLimitLocal.value = newValue; }, { immediate: true });
   watch(fileManagerShowDeleteConfirmationBoolean, (newValue) => { fileManagerShowDeleteConfirmationLocal.value = newValue; }, { immediate: true });
+  watch(fileManagerDoubleClickToOpenBoolean, (newValue) => { fileManagerDoubleClickToOpenLocal.value = newValue; }, { immediate: true });
   watch(terminalEnableRightClickPasteBoolean, (newValue) => { terminalEnableRightClickPasteLocal.value = newValue; }, { immediate: true });
+  watch(terminalRightClickBehaviorString, (newValue) => { terminalRightClickBehaviorLocal.value = newValue; }, { immediate: true });
+  watch(terminalContextMenuItemsObject, (newValue) => { terminalContextMenuItemsLocal.value = { ...newValue }; }, { immediate: true, deep: true });
+  watch(terminalNoWrapBoolean, (newValue) => { terminalNoWrapLocal.value = newValue; }, { immediate: true });
   watch(showPopupFileManagerBoolean, (newValue) => { showPopupFileManagerLocal.value = newValue; }, { immediate: true }); // +++ Watch for popup file manager +++
   watch(statusMonitorShowIpBoolean, (newValue) => { statusMonitorShowIpEnabled.value = newValue; }, { immediate: true });
+  watch(markdownDefaultViewModeString, (newValue) => { markdownDefaultViewModeLocal.value = newValue; }, { immediate: true });
+  watch(markdownDefaultViewModeMobileString, (newValue) => { markdownDefaultViewModeMobileLocal.value = newValue; }, { immediate: true });
 
 
   return {
@@ -381,11 +539,32 @@ export function useWorkspaceSettings() {
     fileManagerShowDeleteConfirmationSuccess,
     handleUpdateFileManagerDeleteConfirmation,
 
+    fileManagerDoubleClickToOpenLocal,
+    fileManagerDoubleClickToOpenLoading,
+    fileManagerDoubleClickToOpenMessage,
+    fileManagerDoubleClickToOpenSuccess,
+    handleUpdateFileManagerDoubleClickToOpen,
+
     terminalEnableRightClickPasteLocal, 
     terminalEnableRightClickPasteLoading, 
     terminalEnableRightClickPasteMessage, 
     terminalEnableRightClickPasteSuccess, 
-    handleUpdateTerminalRightClickPasteSetting, 
+    handleUpdateTerminalRightClickPasteSetting,
+    terminalRightClickBehaviorLocal,
+    terminalRightClickBehaviorLoading,
+    terminalRightClickBehaviorMessage,
+    terminalRightClickBehaviorSuccess,
+    handleUpdateTerminalRightClickBehavior,
+    terminalContextMenuItemsLocal,
+    terminalContextMenuItemsLoading,
+    terminalContextMenuItemsMessage,
+    terminalContextMenuItemsSuccess,
+    handleUpdateTerminalContextMenuItems,
+    terminalNoWrapLocal,
+    terminalNoWrapLoading,
+    terminalNoWrapMessage,
+    terminalNoWrapSuccess,
+    handleUpdateTerminalNoWrapSetting, 
 
     // Popup File Manager
     showPopupFileManagerLocal,
@@ -397,7 +576,19 @@ export function useWorkspaceSettings() {
     statusMonitorShowIpEnabled,
     statusMonitorShowIpLoading,
     statusMonitorShowIpMessage,
-    statusMonitorShowIpSuccess,
+        statusMonitorShowIpSuccess,
     handleUpdateStatusMonitorShowIpSetting,
+
+    markdownDefaultViewModeLocal,
+    markdownDefaultViewModeLoading,
+    markdownDefaultViewModeMessage,
+    markdownDefaultViewModeSuccess,
+    handleUpdateMarkdownDefaultViewMode,
+
+    markdownDefaultViewModeMobileLocal,
+    markdownDefaultViewModeMobileLoading,
+    markdownDefaultViewModeMobileMessage,
+    markdownDefaultViewModeMobileSuccess,
+    handleUpdateMarkdownDefaultViewModeMobile,
   };
 }

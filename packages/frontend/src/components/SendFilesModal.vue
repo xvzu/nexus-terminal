@@ -388,6 +388,7 @@ const handleSend = async () => {
     transferMethod: transferMethod.value,
   };
 
+  // 验证 sourceConnectionId 是否存在
   if (payload.sourceConnectionId === null || payload.sourceConnectionId === undefined) {
     console.error('Source Connection ID is missing in SendFilesModal payload:', payload);
     uiNotificationsStore.showError(t('sendFilesModal.errorSourceConnectionMissing'));
@@ -397,12 +398,13 @@ const handleSend = async () => {
 
   try {
     const response = await apiClient.post('/transfers/send', payload);
+    // Assuming the backend returns something like { taskId: "some-id" } on success
     if (response.data && response.data.taskId) {
       uiNotificationsStore.showSuccess(t('sendFilesModal.transferInitiated', { taskId: response.data.taskId }));
     } else {
       uiNotificationsStore.showSuccess(t('sendFilesModal.transferInitiatedGeneric'));
     }
-    emitWorkspaceEvent('ui:openTransferProgressModal');
+    emitWorkspaceEvent('ui:openTransferProgressModal'); // +++ 触发打开传输进度模态框的事件 +++
     emit('update:visible', false);
   } catch (error: any) {
     console.error('Failed to initiate transfer:', error);

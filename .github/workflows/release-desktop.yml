@@ -1,0 +1,151 @@
+name: Build & Release Desktop App
+
+on:
+  # 仅保留手动触发 (可在 GitHub Actions 页面随时手动点击 "Run workflow" 构建发布，commit不会自动构建)
+  workflow_dispatch:
+    inputs:
+      release_title:
+        description: 'Release 标题 (选填，留空则自动根据版本号命名)'
+        required: false
+        default: ''
+      draft:
+        description: '是否发布为草稿 (Draft，推荐开启，方便你在网页上编辑更新文案后再正式发布)'
+        required: false
+        type: boolean
+        default: true
+      prerelease:
+        description: '是否标记为预发布 (Prerelease)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows Desktop & Release
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出仓库源码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 解析版本号并按需自动创建 Git Tag
+        id: tag_step
+        shell: pwsh
+        run: |
+          $ref = "${{ github.ref_name }}"
+          $pkg = Get-Content package.json | ConvertFrom-Json
+          $pkgVersion = $pkg.version
+
+          if ($ref -like "v*") {
+            $tag = $ref
+          } else {
+            $tag = "v$pkgVersion"
+          }
+
+          Write-Host "当前目标版本 Tag: $tag (package.json: $pkgVersion)"
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$pkgVersion" >> $env:GITHUB_OUTPUT
+
+          # 检查远程与本地是否已存在该 tag
+          $existingTags = git tag -l
+          $tagExists = $existingTags -contains $tag
+
+          if (-not $tagExists) {
+            Write-Host "🏷️ 标签 $tag 尚未创建，正在自动创建并推送到 GitHub..."
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a $tag -m "Release $tag"
+            git push origin $tag
+            Write-Host "✅ 标签 $tag 创建并推送成功！"
+          } else {
+            Write-Host "ℹ️ 标签 $tag 已存在，将直接基于该标签发布/更新 Release 产物。"
+          }
+
+      - name: 配置 Node.js 运行时环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: 配置 Rust 稳定版编译工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: 启用 Rust 编译缓存
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'packages/desktop/src-tauri -> target'
+
+      - name: 安装项目依赖
+        run: npm ci || npm install
+
+      - name: 构建前端生产包 (Frontend)
+        run: npm run build --prefix packages/frontend
+
+      - name: 构建后端生产代码 (Backend)
+        run: npm run build --prefix packages/backend
+
+      - name: 全量打包桌面端 (Tauri v2 + Node Sidecar)
+        run: npm run desktop:build
+
+      - name: 归整与压缩 Release 交付产物
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release-artifacts -Force | Out-Null
+          $tag = "${{ steps.tag_step.outputs.tag }}"
+          Write-Host "当前发布版本: $tag"
+
+          # 1. 提取 NSIS 安装程序
+          $installer = Get-ChildItem -Path "packages/desktop/src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if ($installer) {
+            $installerTarget = "release-artifacts/Nexus-Terminal-Setup-$tag-windows-x64.exe"
+            Copy-Item -Path $installer.FullName -Destination $installerTarget -Force
+            Write-Host "已归整安装包: $installerTarget"
+          } else {
+            Write-Error "未找到生成的 NSIS 安装包！"
+            exit 1
+          }
+
+          # 2. 压缩免安装便携版目录
+          if (Test-Path "dist-desktop/portable") {
+            $portableZip = "release-artifacts/Nexus-Terminal-Portable-$tag-windows-x64.zip"
+            Compress-Archive -Path "dist-desktop/portable/*" -DestinationPath $portableZip -CompressionLevel Optimal -Force
+            Write-Host "已生成便携包: $portableZip"
+          } else {
+            Write-Warning "未找到便携版目录 dist-desktop/portable"
+          }
+
+          # 3. 计算 SHA256 校验和清单 (仅对 .exe 与 .zip 产物计算，规避写入自身时的文件锁死锁)
+          $checksums = Get-ChildItem -Path "release-artifacts" -File | Where-Object { $_.Name -like "*.exe" -or $_.Name -like "*.zip" } | ForEach-Object {
+            $hash = Get-FileHash -Path $_.FullName -Algorithm SHA256
+            ('{0}  {1}' -f $hash.Hash.ToLower(), $_.Name)
+          }
+          $checksums | Set-Content -Path "release-artifacts/checksums-sha256.txt" -Encoding utf8
+          Write-Host "已生成 SHA256 校验清单:"
+          Get-Content "release-artifacts/checksums-sha256.txt"
+
+      - name: 上传构建产物至 Actions Artifacts (方便直接在运行页下载测试)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-terminal-desktop-windows-x64
+          path: release-artifacts/*
+          retention-days: 7
+
+      - name: 发布至 GitHub Release (默认发布为草稿 Draft，方便撰写文案)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag_step.outputs.tag }}
+          name: ${{ inputs.release_title || steps.tag_step.outputs.tag }}
+          files: release-artifacts/*
+          draft: ${{ inputs.draft != false }}
+          prerelease: ${{ inputs.prerelease || false }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

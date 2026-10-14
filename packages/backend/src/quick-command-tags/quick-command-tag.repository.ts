@@ -5,6 +5,7 @@ import { getDbInstance, runDb, getDb as getDbRow, allDb } from '../database/conn
 export interface QuickCommandTag {
     id: number;
     name: string;
+    background_color?: string | null;
     created_at: number;
     updated_at: number;
 }
@@ -40,12 +41,12 @@ export const findQuickCommandTagById = async (id: number): Promise<QuickCommandT
 /**
  * 创建新快捷指令标签
  */
-export const createQuickCommandTag = async (name: string): Promise<number> => {
+export const createQuickCommandTag = async (name: string, backgroundColor?: string | null): Promise<number> => {
     const now = Math.floor(Date.now() / 1000);
-    const sql = `INSERT INTO quick_command_tags (name, created_at, updated_at) VALUES (?, ?, ?)`;
+    const sql = `INSERT INTO quick_command_tags (name, background_color, created_at, updated_at) VALUES (?, ?, ?, ?)`;
     try {
         const db = await getDbInstance();
-        const result = await runDb(db, sql, [name, now, now]);
+        const result = await runDb(db, sql, [name, backgroundColor || null, now, now]);
         if (typeof result.lastID !== 'number' || result.lastID <= 0) {
              throw new Error('创建快捷指令标签后未能获取有效的 lastID');
         }
@@ -60,14 +61,27 @@ export const createQuickCommandTag = async (name: string): Promise<number> => {
 };
 
 /**
- * 更新快捷指令标签名称
+ * 更新快捷指令标签名称与背景颜色
  */
-export const updateQuickCommandTag = async (id: number, name: string): Promise<boolean> => {
+export const updateQuickCommandTag = async (id: number, name?: string, backgroundColor?: string | null): Promise<boolean> => {
     const now = Math.floor(Date.now() / 1000);
-    const sql = `UPDATE quick_command_tags SET name = ?, updated_at = ? WHERE id = ?`;
+    const updates: string[] = ['updated_at = ?'];
+    const params: any[] = [now];
+
+    if (typeof name === 'string') {
+        updates.push('name = ?');
+        params.push(name);
+    }
+    if (typeof backgroundColor !== 'undefined') {
+        updates.push('background_color = ?');
+        params.push(backgroundColor || null);
+    }
+    params.push(id);
+
+    const sql = `UPDATE quick_command_tags SET ${updates.join(', ')} WHERE id = ?`;
     try {
         const db = await getDbInstance();
-        const result = await runDb(db, sql, [name, now, id]);
+        const result = await runDb(db, sql, params);
         return result.changes > 0;
     } catch (err: any) {
          console.error(`[仓库] 更新快捷指令标签 ${id} 时出错:`, err.message);
@@ -79,17 +93,42 @@ export const updateQuickCommandTag = async (id: number, name: string): Promise<b
 };
 
 /**
- * 删除快捷指令标签 (同时会通过外键 CASCADE 删除关联)
+ * 删除快捷指令标签 (可选择是否连带删除其中的快捷指令)
+ * @param id 标签 ID
+ * @param deleteCommands 是否连同该标签内的快捷指令一起删除
  */
-export const deleteQuickCommandTag = async (id: number): Promise<boolean> => {
-    const sql = `DELETE FROM quick_command_tags WHERE id = ?`;
+export const deleteQuickCommandTag = async (id: number, deleteCommands: boolean = false): Promise<boolean> => {
+    const db = await getDbInstance();
     try {
-        const db = await getDbInstance();
-        // 由于 quick_command_tag_associations 设置了 ON DELETE CASCADE,
-        // 删除 quick_command_tags 中的记录会自动删除关联表中的相关记录。
-        const result = await runDb(db, sql, [id]);
+        await runDb(db, 'BEGIN TRANSACTION');
+
+        if (deleteCommands) {
+            // 找出属于该标签的所有快捷指令 ID
+            const rows = await allDb<{ quick_command_id: number }>(
+                db,
+                'SELECT DISTINCT quick_command_id FROM quick_command_tag_associations WHERE tag_id = ?',
+                [id]
+            );
+            const cmdIds = rows.map(r => r.quick_command_id);
+            if (cmdIds.length > 0) {
+                const placeholders = cmdIds.map(() => '?').join(',');
+                // 1. 删除这些指令相关的全部标签关联
+                await runDb(db, `DELETE FROM quick_command_tag_associations WHERE quick_command_id IN (${placeholders})`, cmdIds);
+                // 2. 删除快捷指令本体
+                await runDb(db, `DELETE FROM quick_commands WHERE id IN (${placeholders})`, cmdIds);
+            }
+        }
+
+        // 无论是否删除指令，均显式清理该标签在关联表中的记录，确保零孤儿记录残留
+        await runDb(db, 'DELETE FROM quick_command_tag_associations WHERE tag_id = ?', [id]);
+
+        // 删除快捷指令标签本身
+        const result = await runDb(db, 'DELETE FROM quick_command_tags WHERE id = ?', [id]);
+
+        await runDb(db, 'COMMIT');
         return result.changes > 0;
     } catch (err: any) {
+        await runDb(db, 'ROLLBACK');
         console.error(`[仓库] 删除快捷指令标签 ${id} 时出错:`, err.message);
         throw new Error('删除快捷指令标签失败');
     }

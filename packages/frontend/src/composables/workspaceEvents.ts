@@ -8,11 +8,12 @@ export type WorkspaceEventPayloads = {
   // Terminal Events
   'terminal:input': { sessionId: string; data: string };
   'terminal:resize': { sessionId: string; dims: { cols: number; rows: number } };
-  'terminal:ready': { sessionId: string; terminal: XtermTerminal; searchAddon: any };
+  'terminal:ready': { sessionId: string; terminal: XtermTerminal; searchAddon: any; serializeAddon?: any };
   'terminal:sendCommand': { command: string; sessionId?: string }; // sessionId 可选，用于指定目标，默认为 active
   'terminal:clear': void; // sessionId 可选，默认为 active
   'terminal:scrollToBottomRequest': { sessionId: string };
   'terminal:stabilizedResize': { sessionId: string; width: number; height: number }; // 用于传递稳定后的尺寸
+  'terminal:cwdChanged': { sessionId: string; cwd: string }; // 终端当前工作目录变更事件
 
 
   // Editor Events
@@ -50,12 +51,25 @@ export type WorkspaceEventPayloads = {
 'ui:openTransferProgressModal': void; // 请求打开文件传输进度模态框
   // 'ui:toggleVirtualKeyboard': void; // 如果决定迁移 CommandInputBar 的这个事件
   'fileManager:openModalRequest': { sessionId: string }; // 请求打开文件管理器模态框
+  'fileManager:itemsMoved': { sessionId: string; sourceDir: string; targetDir: string }; // 跨窗格/内部文件移动完成通知
+  'fileManager:navigateToPath': { path: string; sessionId?: string; instanceId?: string }; // 在布局中文件管理器中导航到指定路径 (支持指定 instanceId)
+  'fileManager:setDirectoryTreeVisible': { instanceId: string; show: boolean }; // 同一组件实例多会话同步目录树显隐
+  'fileManager:setViewMode': { instanceId: string; viewMode: 'list' | 'tile' }; // 同一组件实例多会话同步视图模式
+  'fileManager:setDirectoryTreeWidth': { instanceId: string; width: number }; // 同一组件实例多会话同步目录树宽度
 
   // Suspended SSH Session Events
   'suspendedSession:actionCompleted': void; // Emitted when a resume/remove action is completed
 
   // Quick Command Events
   'quickCommand:executeProcessed': { command: string; sessionId?: string };
+  'quickCommand:requestAdd': { initialCommand?: string }; // 请求打开添加快捷指令表单并填入初始内容
+
+  // Command Input Fill Event (供历史记录/快捷指令等填入命令行或多行输入框)
+  'commandInput:fill': { command: string };
+
+  // Workspace Sync & Mutual Exclusion Events
+  'workspace:takeoverKickout': { activeClientId: string };
+  'workspace:requestStateSave': void;
 };
 
 // 创建 mitt 事件发射器实例

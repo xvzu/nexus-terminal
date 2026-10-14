@@ -1,0 +1,17 @@
+{
+  "name": "@nexus-terminal/desktop",
+  "version": "0.9.5",
+  "private": true,
+  "description": "Tauri v2 Desktop Shell with Node.js Sidecar for Nexus Terminal",
+  "scripts": {
+    "build:sidecar": "node scripts/build-sidecar.js",
+    "tauri": "tauri",
+    "desktop:dev": "npm run build:sidecar && tauri dev",
+    "desktop:build": "node scripts/build-desktop.js",
+    "desktop:build:quick": "node scripts/build-desktop.js --quick",
+    "desktop:sync": "node scripts/build-sidecar.js"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

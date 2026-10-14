@@ -16,10 +16,50 @@ if (rootConfigResult.error && (rootConfigResult.error as NodeJS.ErrnoException).
     console.log(`[ENV Init Early] Root .env file not found at ${projectRootEnvPath}, proceeding without it.`);
 }
 
-// 2. 加载 data/.env 文件 (定义密钥等)
-// 注意: 这个路径是相对于编译后的 dist/src/index.js
-const dataEnvPathGlobal = path.resolve(__dirname, '../data/.env'); // Renamed to avoid conflict if 'dataEnvPath' is used later
-const dataConfigResultGlobal = dotenv.config({ path: dataEnvPathGlobal }); // Renamed
+import { getDataEnvPath, getSessionsDir, getLogsDir } from './services/storage-path.service';
+
+// --- 配置服务运行日志落盘 (持久化到 data/logs/server.log，便于桌面端排查) ---
+function setupFileLogging() {
+  try {
+    const logsDir = getLogsDir();
+    const logFilePath = path.join(logsDir, 'server.log');
+    const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+
+    const originalLog = console.log;
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    function formatMessage(level: string, args: any[]) {
+      const timestamp = new Date().toISOString();
+      const msg = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+      return `[${timestamp}] [${level}] ${msg}\n`;
+    }
+
+    console.log = (...args: any[]) => {
+      originalLog.apply(console, args);
+      try { logStream.write(formatMessage('INFO', args)); } catch {}
+    };
+
+    console.warn = (...args: any[]) => {
+      originalWarn.apply(console, args);
+      try { logStream.write(formatMessage('WARN', args)); } catch {}
+    };
+
+    console.error = (...args: any[]) => {
+      originalError.apply(console, args);
+      try { logStream.write(formatMessage('ERROR', args)); } catch {}
+    };
+
+    console.log('[Logging] 后台服务日志落盘已启用:', logFilePath);
+  } catch (err: any) {
+    console.warn('[Logging] 启用日志落盘失败:', err.message);
+  }
+}
+setupFileLogging();
+
+// 2. 加载 data/.env 文件 (定义密钥等，支持便携式与桌面端动态路径)
+const dataEnvPathGlobal = getDataEnvPath();
+const dataConfigResultGlobal = dotenv.config({ path: dataEnvPathGlobal });
 
 if (dataConfigResultGlobal.error && (dataConfigResultGlobal.error as NodeJS.ErrnoException).code !== 'ENOENT') {
     console.warn(`[ENV Init Early] Warning: Could not load data .env file from ${dataEnvPathGlobal}. Error: ${dataConfigResultGlobal.error.message}`);
@@ -56,6 +96,13 @@ import sshSuspendRouter from './ssh-suspend/ssh-suspend.routes';
 import { transfersRoutes } from './transfers/transfers.routes';
 import pathHistoryRoutes from './path-history/path-history.routes';
 import favoritePathsRouter from './favorite-paths/favorite-paths.routes';
+import workspaceSyncRouter from './workspace-sync/workspace-sync.routes';
+import desktopRouter from './settings/desktop.routes';
+import syncRouter from './sync/sync.routes';
+import syncV2Router from './sync/sync.v2.routes';
+import fileColorHighlightsRouter from './file-color-highlights/file-color-highlights.routes';
+import { syncThrottleScheduler } from './sync/sync.scheduler';
+import { syncWsClient } from './sync/sync.ws-client';
 import { initializeWebSocket } from './websocket';
 import { ipWhitelistMiddleware } from './auth/ipWhitelist.middleware';
 
@@ -68,7 +115,7 @@ import './notifications/notification.dispatcher.service';
 
 // --- 全局错误处理 ---
 // 捕获未处理的 Promise Rejection
-process.on('unhandledRejection', (reason: any) => {
+process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
     console.error('---未处理的 Promise Rejection---');
     console.error('原因:', reason);
     process.exit(1);
@@ -176,8 +223,8 @@ const server = http.createServer(app);
 app.set('trust proxy', true);
 
 // --- 中间件 ---
-app.use(ipWhitelistMiddleware as RequestHandler);
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // --- 静态文件服务 ---
 const uploadsPath = path.join(__dirname, '../uploads');
@@ -222,11 +269,7 @@ const initializeDatabase = async () => {
 const startServer = () => {
     // --- 会话中间件配置 ---
     const FileStore = sessionFileStore(session);
-    // 修改路径以匹配 Docker volume 挂载点 /app/data
-    const sessionsPath = path.join('/app/data', 'sessions');
-    if (!fs.existsSync(sessionsPath)) {
-        fs.mkdirSync(sessionsPath, { recursive: true });
-    }
+    const sessionsPath = getSessionsDir();
     const sessionMiddleware = session({
         store: new FileStore({
             path: sessionsPath,
@@ -265,20 +308,74 @@ const startServer = () => {
     app.use('/api/v1/transfers', transfersRoutes());
     app.use('/api/v1/path-history', pathHistoryRoutes);
     app.use('/api/v1/favorite-paths', favoritePathsRouter);
+    app.use('/api/v1/workspace-sync', workspaceSyncRouter);
+    app.use('/api/v1/desktop', desktopRouter);
+    app.use('/api/v1/sync', syncRouter);
+    app.use('/api/sync/v2', syncV2Router);
+    app.use('/api/v1/connections/:connectionId/file-color-highlights', fileColorHighlightsRouter);
+    app.use('/api/v1/file-color-highlights', fileColorHighlightsRouter);
     
     // 状态检查接口
+
     app.get('/api/v1/status', (req: Request, res: Response) => {
       res.json({ status: '后端服务运行中！' });
     });
     // --- 结束 API 路由 ---
 
+    // --- 前端静态资源托管与 SPA 回退 ---
+    const candidateFrontendDirs = [
+      process.env.NEXUS_FRONTEND_DIR,
+      path.resolve(__dirname, 'public'),
+      path.resolve(__dirname, '../public'),
+      path.resolve(__dirname, '../../public'),
+      path.resolve(__dirname, 'frontend/dist'),
+      path.resolve(__dirname, '../../../frontend/dist'),
+      path.resolve(__dirname, '../../frontend/dist'),
+      path.resolve(process.cwd(), 'resources/server/public'),
+      path.resolve(process.cwd(), 'server/public'),
+      path.resolve(process.cwd(), 'public'),
+      path.resolve(process.cwd(), 'frontend/dist')
+    ].filter((dir): dir is string => Boolean(dir && fs.existsSync(path.join(dir, 'index.html'))));
 
-    server.listen(port, () => {
-        console.log(`后端服务器正在监听 http://localhost:${port}`);
+    if (candidateFrontendDirs.length > 0) {
+      const frontendStaticDir = candidateFrontendDirs[0];
+      console.log(`[Frontend Static] 已检测到前端静态资源，正在托管: ${frontendStaticDir}`);
+      
+      // 托管静态资产，对 index.html 禁用强缓存，确保每次热重载和版本更新即时生效
+      app.use(express.static(frontendStaticDir, {
+        setHeaders: (res: Response, filePath: string) => {
+          if (filePath.endsWith('index.html')) {
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+          }
+        }
+      }));
+
+      // SPA 路由回退 (所有未匹配的 GET 请求返回 index.html)
+      app.use((req: Request, res: Response, next: NextFunction): void => {
+        if (req.method !== 'GET') {
+          return next();
+        }
+        if (req.path.startsWith('/api/') || req.path.startsWith('/ws')) {
+          res.status(404).json({ error: 'Not Found' });
+          return;
+        }
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        res.sendFile(path.join(frontendStaticDir, 'index.html'));
+      });
+    } else {
+      console.log('[Frontend Static] 未检测到前端构建产物，仅提供 API 与 WebSocket 服务。');
+    }
+
+    const host = process.env.HOST || '0.0.0.0';
+    server.listen(Number(port), host, () => {
+        console.log(`后端服务器正在监听 http://${host}:${port}`);
         initializeWebSocket(server, sessionMiddleware as RequestHandler).catch(err => {
             console.error('WebSocket 初始化失败:', err);
         });
-
     });
 };
 
@@ -287,9 +384,24 @@ const main = async () => {
     await initializeEnvironment(); // 首先初始化环境和密钥
     await initializeDatabase();   // 然后初始化数据库
     startServer();                // 最后启动服务器
+
+    // 激活双端增量同步调度器与存量数据对齐 (Reconciliation Catch-up)
+    try {
+        await syncThrottleScheduler.activateAndCatchup();
+    } catch (syncErr: any) {
+        console.warn('[Sync] 调度器初始化激活告警:', syncErr.message);
+    }
+
+    // 启动桌面端到云端的 WebSocket 实时同步长连接守护客户端
+    try {
+        void syncWsClient.start();
+    } catch (wsErr: any) {
+        console.warn('[Sync] 启动实时长连接客户端告警:', wsErr.message);
+    }
 };
 
 main().catch(error => {
     console.error("启动过程中发生未处理的错误:", error);
     process.exit(1);
 });
+

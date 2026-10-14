@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, onBeforeUnmount, nextTick, type PropType } from 'vue';
+import { ref, computed, onMounted, watch, onBeforeUnmount, nextTick, type PropType } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useFavoritePathsStore, type FavoritePathItem } from '../stores/favoritePaths.store';
-import { useSessionStore } from '../stores/session.store';
-import { useUiNotificationsStore } from '../stores/uiNotifications.store';
 import AddEditFavoritePathForm from './AddEditFavoritePathForm.vue';
-import { useWorkspaceEventEmitter } from '../composables/workspaceEvents';
 import { useConfirmDialog } from '../composables/useConfirmDialog';
+import { useUiNotificationsStore } from '../stores/uiNotifications.store';
+import MobileFavoritePathsModal from './MobileFavoritePathsModal.vue';
 
 const PADDING = 8; // px
 
@@ -19,27 +18,150 @@ const props = defineProps({
     type: Object as PropType<HTMLElement | null>,
     default: null,
   },
+  isMobile: {
+    type: Boolean,
+    default: false,
+  },
+  currentPath: {
+    type: String,
+    default: '',
+  },
 });
 
 const emit = defineEmits(['close', 'navigateToPath']);
 
 const { t } = useI18n();
 const favoritePathsStore = useFavoritePathsStore();
-const sessionStore = useSessionStore();
-const uiNotificationsStore = useUiNotificationsStore();
-const emitWorkspaceEvent = useWorkspaceEventEmitter();
 const { showConfirmDialog } = useConfirmDialog();
+const uiNotificationsStore = useUiNotificationsStore();
 
+const searchTerm = ref('');
 const showAddEditModal = ref(false);
 const editingPathItem = ref<FavoritePathItem | null>(null);
 const modalContentRef = ref<HTMLElement | null>(null);
 const modalStyle = ref<Record<string, string>>({});
+const searchInputRef = ref<HTMLInputElement | null>(null);
+const listContainerRef = ref<HTMLElement | null>(null);
+const selectedIndex = ref<number>(0);
+
+const filteredPaths = computed(() => {
+  if (!searchTerm.value) {
+    return favoritePathsStore.favoritePaths;
+  }
+  const lowerSearchTerm = searchTerm.value.toLowerCase();
+  return favoritePathsStore.favoritePaths.filter(
+    (p) =>
+      p.path.toLowerCase().includes(lowerSearchTerm) ||
+      (p.name && p.name.toLowerCase().includes(lowerSearchTerm))
+  );
+});
+
+// 当过滤结果变动时，纠偏当前选中的索引
+watch(filteredPaths, (newList) => {
+  if (newList.length === 0) {
+    selectedIndex.value = -1;
+  } else if (selectedIndex.value >= newList.length || selectedIndex.value < 0) {
+    selectedIndex.value = 0;
+  }
+}, { immediate: true });
+
+const scrollToSelectedItem = () => {
+  nextTick(() => {
+    if (!listContainerRef.value) return;
+    const selectedEl = listContainerRef.value.querySelector(`[data-index="${selectedIndex.value}"]`) as HTMLElement;
+    if (selectedEl) {
+      selectedEl.scrollIntoView({ block: 'nearest' });
+    }
+  });
+};
+
+const handleSearchKeyDown = (event: KeyboardEvent) => {
+  const list = filteredPaths.value;
+  if (list.length === 0) {
+    if (event.key === 'Escape' || event.code === 'Escape') {
+      event.preventDefault();
+      closeModal();
+    }
+    return;
+  }
+
+  const isDown = event.key === 'ArrowDown' || event.code === 'ArrowDown';
+  const isUp = event.key === 'ArrowUp' || event.code === 'ArrowUp';
+  const isEnter = event.key === 'Enter' || event.code === 'Enter' || event.code === 'NumpadEnter';
+  const isEsc = event.key === 'Escape' || event.code === 'Escape';
+
+  if (isDown) {
+    event.preventDefault();
+    selectedIndex.value = (selectedIndex.value + 1) % list.length;
+    scrollToSelectedItem();
+  } else if (isUp) {
+    event.preventDefault();
+    selectedIndex.value = (selectedIndex.value - 1 + list.length) % list.length;
+    scrollToSelectedItem();
+  } else if (isEnter) {
+    event.preventDefault();
+    if (selectedIndex.value >= 0 && selectedIndex.value < list.length) {
+      handleItemClick(list[selectedIndex.value]);
+    }
+  } else if (isEsc) {
+    event.preventDefault();
+    closeModal();
+  }
+};
+
+const currentSortBy = computed(() => favoritePathsStore.currentSortBy);
+
+const sortButtonIcon = computed(() => {
+  return currentSortBy.value === 'name' ? 'fas fa-sort-alpha-down' : 'fas fa-clock';
+});
+
+const toggleSort = () => {
+  const newSortBy = currentSortBy.value === 'name' ? 'last_used_at' : 'name';
+  favoritePathsStore.setSortBy(newSortBy);
+};
+
+const closeModal = () => {
+  emit('close');
+};
+
+const handleItemClick = async (pathItem: FavoritePathItem) => {
+  try {
+    await favoritePathsStore.markPathAsUsed(pathItem.id, t);
+  } catch (error) {
+    console.error('Failed to mark path as used:', error);
+  }
+  emit('navigateToPath', pathItem.path);
+  closeModal();
+};
+
+const FAV_GRADIENT_PAIRS: Array<[string, string]> = [
+  ['#bfdbfe', '#e9d5ff'],
+  ['#bbf7d0', '#fef6d5'],
+  ['#fecaca', '#fde68a'],
+  ['#bae6fd', '#c7d2fe'],
+  ['#fbcfe8', '#ddd6fe'],
+  ['#a7f3d0', '#fef9c3'],
+  ['#fed7aa', '#fecdd3'],
+  ['#ddd6fe', '#bfdbfe'],
+  ['#fecdd3', '#fef6d5'],
+  ['#c7d2fe', '#bbf7d0'],
+];
+const favGradientCache = new Map<string | number, string>();
+const favGradient = (favPath: FavoritePathItem): string => {
+  const hit = favGradientCache.get(favPath.id);
+  if (hit) return hit;
+  const pair = FAV_GRADIENT_PAIRS[Math.floor(Math.random() * FAV_GRADIENT_PAIRS.length)];
+  const g = `linear-gradient(135deg, ${pair[0]}, ${pair[1]})`;
+  favGradientCache.set(favPath.id, g);
+  return g;
+};
 
 const openAddModal = () => {
   editingPathItem.value = null;
   showAddEditModal.value = true;
 };
 
+// 收藏夹右键菜单（条目 + 空白区）
 const favoriteCtxMenuVisible = ref(false);
 const favoriteCtxMenuPosition = ref({ x: 0, y: 0 });
 const favoriteCtxTarget = ref<FavoritePathItem | null>(null);
@@ -91,11 +213,6 @@ const closeFavoriteContextMenu = () => {
   document.removeEventListener('click', closeFavoriteContextMenu);
 };
 
-const handleItemClick = (pathItem: FavoritePathItem) => {
-  emit('navigateToPath', pathItem.path);
-  closeModal();
-};
-
 const openEditModal = (pathItem: FavoritePathItem) => {
   editingPathItem.value = { ...pathItem };
   showAddEditModal.value = true;
@@ -115,85 +232,61 @@ const handleDelete = async (pathItem: FavoritePathItem) => {
   }
 };
 
-const handleSendToTerminal = (pathItem: FavoritePathItem) => {
-  const activeSession = sessionStore.activeSession;
-  if (activeSession && activeSession.terminalManager) {
-    const escapedPath = `"${pathItem.path.replace(/"/g, '\\"')}"`;
-    const command = `cd ${escapedPath}\n`;
-    try {
-      activeSession.terminalManager.sendData(command);
-    } catch (error) {
-      console.error('[FavoritePathsModal] Failed to send command to active terminal:', error);
-    }
-  } else {
-    console.warn('[FavoritePathsModal] No active session with a terminal manager found to send path to.');
-  }
-  closeModal(); 
-};
-
-const closeModal = () => {
-  emit('close');
-};
+const isPositioned = ref(false);
 
 const updatePosition = () => {
-  if (!props.isVisible || !props.triggerElement || !modalContentRef.value) {
-    return;
-  }
+  if (props.isMobile) return;
+  if (!props.triggerElement || !modalContentRef.value) return;
 
   const triggerRect = props.triggerElement.getBoundingClientRect();
-  const modalWidth = modalContentRef.value.offsetWidth;
-  const modalHeight = modalContentRef.value.offsetHeight;
+  const modalRect = modalContentRef.value.getBoundingClientRect();
 
-  // If dimensions are zero when modal is supposed to be visible,
-  // it might mean content affecting size isn't ready. Retry once.
-  if (modalWidth === 0 && modalHeight === 0 && props.isVisible) {
-    nextTick(updatePosition);
-    return;
-  }
-  
-  const viewportWidth = window.innerWidth;
-  const viewportHeight = window.innerHeight;
+  if (triggerRect.width === 0 && triggerRect.height === 0) return;
 
-  let top = triggerRect.bottom + 2; // Default position below trigger, with a small 2px gap
-  let left = triggerRect.left;
+  const modalWidth = modalRect.width || 320;
+  const modalHeight = modalRect.height || 280;
+  const windowHeight = window.innerHeight;
+  const windowWidth = window.innerWidth;
 
-  // Check for bottom overflow
-  if (top + modalHeight + PADDING > viewportHeight) {
-    // Try to position above the trigger
-    top = triggerRect.top - modalHeight - 2; // Position above trigger, with a small 2px gap
-  }
-
-  // If positioning above also causes top overflow (e.g., trigger is near the top and modal is tall)
-  if (top < PADDING) {
-    top = PADDING; // Align to viewport top with padding
-    // Note: If modalHeight is still greater than viewportHeight - 2*PADDING,
-    // it will overflow downwards. The `max-h-80` class on the modal
-    // should generally prevent the modal itself from being excessively tall.
-  }
-
-  // Check for right overflow
-  if (left + modalWidth + PADDING > viewportWidth) {
-    left = viewportWidth - modalWidth - PADDING; // Align to viewport right edge
-  }
-
-  // Check for left overflow (less likely with initial left alignment to trigger, but good for robustness)
+  // 1. 水平定位：面包屑按钮多在右侧，优先让弹窗右侧与按钮对齐，避免右侧溢出
+  let left = triggerRect.right - modalWidth;
   if (left < PADDING) {
-    left = PADDING; // Align to viewport left edge
+    left = triggerRect.left;
+  }
+  if (left + modalWidth > windowWidth - PADDING) {
+    left = windowWidth - modalWidth - PADDING;
+  }
+  if (left < PADDING) {
+    left = PADDING;
+  }
+
+  // 2. 垂直定位：默认优先向下展示（按钮下方）
+  let top = triggerRect.bottom + PADDING;
+  const spaceBelow = windowHeight - triggerRect.bottom - PADDING;
+  const spaceAbove = triggerRect.top - PADDING;
+
+  // 仅在下方空间不足且上方空间更大时才向上展开
+  if (top + modalHeight > windowHeight - PADDING) {
+    if (spaceAbove >= modalHeight || spaceAbove > spaceBelow) {
+      top = Math.max(PADDING, triggerRect.top - modalHeight - PADDING);
+    } else {
+      top = Math.max(PADDING, windowHeight - modalHeight - PADDING);
+    }
   }
 
   modalStyle.value = {
-    position: 'fixed', // Position relative to the viewport
-    top: `${top}px`,
-    left: `${left}px`,
+    position: 'fixed',
+    top: `${Math.round(top)}px`,
+    left: `${Math.round(left)}px`,
   };
+  isPositioned.value = true;
 };
 
-// --- Click Outside Logic ---
 const handleClickOutside = (event: MouseEvent) => {
+  if (props.isMobile) return;
   if (props.triggerElement && props.triggerElement.contains(event.target as Node)) {
     return;
   }
-
   if (modalContentRef.value && !modalContentRef.value.contains(event.target as Node)) {
     if (!showAddEditModal.value) { 
       closeModal();
@@ -203,74 +296,102 @@ const handleClickOutside = (event: MouseEvent) => {
 
 watch(() => props.isVisible, (newValue: boolean) => {
   if (newValue) {
-    document.addEventListener('mousedown', handleClickOutside);
-    nextTick(() => { // Ensure DOM is ready for measurements
-      updatePosition(); // Calculate initial position
-      window.addEventListener('resize', updatePosition); // Adjust position on window resize
-    });
+    searchTerm.value = '';
+    selectedIndex.value = filteredPaths.value.length > 0 ? 0 : -1;
+    isPositioned.value = false;
+    if (!props.isMobile) {
+      document.addEventListener('mousedown', handleClickOutside);
+      nextTick(() => {
+        updatePosition();
+        window.addEventListener('resize', updatePosition);
+        searchInputRef.value?.focus();
+      });
+    }
   } else {
+    isPositioned.value = false;
     document.removeEventListener('mousedown', handleClickOutside);
-    window.removeEventListener('resize', updatePosition); // Clean up resize listener
+    window.removeEventListener('resize', updatePosition);
   }
 });
 
 onMounted(() => {
-  if (props.isVisible) {
+  if (props.isVisible && !props.isMobile) {
+    searchTerm.value = ''; 
+    selectedIndex.value = filteredPaths.value.length > 0 ? 0 : -1;
+    isPositioned.value = false;
     document.addEventListener('mousedown', handleClickOutside);
     nextTick(() => { 
       updatePosition();
       window.addEventListener('resize', updatePosition);
+      searchInputRef.value?.focus();
     });
   }
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', handleClickOutside);
-  window.removeEventListener('resize', updatePosition); // Ensure resize listener is cleaned up
+  window.removeEventListener('resize', updatePosition);
 });
-
 </script>
 
 <template>
-  <!-- New single root element -->
-  <div>
-    <!-- Favorite Paths Dropdown -->
+  <!-- 移动端：委托给专门的 MobileFavoritePathsModal -->
+  <MobileFavoritePathsModal
+    v-if="props.isMobile"
+    :is-visible="props.isVisible"
+    :current-path="props.currentPath"
+    @close="closeModal"
+    @navigate-to-path="(p: string) => emit('navigateToPath', p)"
+  />
+
+  <!-- 桌面端常规绝对定位下拉浮层 (通过 Teleport 挂载到 body，避免被局部容器包含块或尺寸挤压干扰) -->
+  <Teleport to="body" v-else>
     <div
       v-if="isVisible"
       ref="modalContentRef"
       :style="modalStyle"
-      class="z-50 w-72 md:w-80 rounded-md bg-background shadow-lg border border-border/50 max-h-80 flex flex-col overflow-hidden"
+      class="fixed z-[1001] w-72 md:w-80 rounded-md bg-background shadow-lg border border-border/50 max-h-80 flex flex-col overflow-hidden transition-opacity duration-150"
+      :class="isPositioned ? 'opacity-100' : 'opacity-0 pointer-events-none'"
     >
-      <!-- Path List - Horizontal -->
-      <div class="overflow-y-auto flex-grow p-2" @contextmenu.prevent="showBlankContextMenu">
-        <div v-if="favoritePathsStore.isLoading && favoritePathsStore.favoritePaths.length === 0" class="p-3 text-center text-text-secondary text-sm">
-          <i class="fas fa-spinner fa-spin mr-1"></i>
-          {{ t('favoritePaths.loading', 'Loading favorites...') }}
+
+      <!-- Path List -->
+      <div ref="listContainerRef" class="overflow-y-auto flex-grow p-1 text-sm select-none flex flex-wrap gap-1.5 content-start items-start" @contextmenu.prevent="showBlankContextMenu">
+        <div v-if="favoritePathsStore.isLoading && filteredPaths.length === 0" class="p-3 text-center text-text-secondary">
+          {{ t('favoritePaths.loading', 'Loading favorite paths...') }}
         </div>
-        <div v-else-if="!favoritePathsStore.isLoading && favoritePathsStore.favoritePaths.length === 0" class="p-3 text-center text-text-secondary text-sm">
-          <i class="fas fa-star-half-alt mr-1"></i>
-          {{ t('favoritePaths.noFavorites', 'No favorite paths yet.') }}
+        <div v-else-if="!favoritePathsStore.isLoading && filteredPaths.length === 0" class="p-3 text-center text-text-secondary">
+          {{ searchTerm ? t('favoritePaths.noResults', 'No matching paths found') : t('favoritePaths.noFavorites', 'No favorite paths yet. Add one!') }}
         </div>
-        <ul v-else class="list-none p-0 m-0 flex flex-wrap content-start gap-1.5">
-          <li
-            v-for="favPath in favoritePathsStore.favoritePaths"
-            :key="favPath.id"
-            class="inline-flex rounded-md hover:bg-primary/10 transition-colors duration-150 cursor-pointer"
-            @click="handleItemClick(favPath)"
-            @contextmenu.prevent.stop="showFavoriteContextMenu($event, favPath)"
-            :title="favPath.path"
-          >
-            <span class="font-medium truncate text-foreground hover:text-primary px-2 py-1 text-sm"
-                  :style="{ maxWidth: '200px' }">{{ favPath.name || favPath.path }}</span>
-          </li>
-        </ul>
+        <div
+          v-else
+          class="contents"
+        >
+        <div
+          v-for="(favPath, idx) in filteredPaths"
+          :key="favPath.id"
+          :data-index="idx"
+          class="fav-rand group flex flex-col items-center justify-center p-1.5 rounded-lg cursor-pointer transition-all duration-150 text-center min-w-0"
+          :class="[
+            idx === selectedIndex
+              ? 'ring-2 ring-primary'
+              : ''
+          ]"
+          :style="{ background: favGradient(favPath) }"
+          @click="handleItemClick(favPath)"
+          @mouseenter="selectedIndex = idx"
+          @contextmenu.prevent.stop="showFavoriteContextMenu($event, favPath)"
+          :title="favPath.path"
+        >
+          <span class="font-bold block truncate w-full text-sm">{{ favPath.name || favPath.path }}</span>
+        </div>
+        </div>
       </div>
     </div>
 
-    <!-- Context Menu for Favorites -->
+    <!-- 右键菜单 -->
     <div
       v-if="favoriteCtxMenuVisible"
-      class="fixed bg-background border border-border/50 shadow-xl rounded-lg py-1.5 z-[60] min-w-[160px] fav-ctx-menu"
+      class="fixed bg-background border border-border/50 shadow-xl rounded-lg py-1.5 z-[1100] min-w-[160px] fav-ctx-menu"
       :style="{ top: `${favoriteCtxMenuPosition.y}px`, left: `${favoriteCtxMenuPosition.x}px` }"
       @click.stop
     >
@@ -281,6 +402,13 @@ onBeforeUnmount(() => {
         >
           <i class="fas fa-plus mr-2 w-4 text-center"></i>
           <span>{{ t('favoritePaths.addNew', '添加收藏') }}</span>
+        </li>
+        <li
+          class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1"
+          @click="toggleSort(); closeFavoriteContextMenu()"
+        >
+          <i class="fas fa-sort text-xs text-text-secondary group-hover:text-primary w-4 text-center"></i>
+          <span>切换排序</span>
         </li>
         <li v-if="favoriteCtxTarget" class="border-t border-border/50 my-1"></li>
         <li
@@ -302,15 +430,18 @@ onBeforeUnmount(() => {
       </ul>
     </div>
 
-    <!-- Add/Edit Modal -->
+    <!-- Add/Edit Modal (Desktop) -->
     <AddEditFavoritePathForm
-      v-if="showAddEditModal"
       :is-visible="showAddEditModal"
       :path-data="editingPathItem"
+      :current-path="props.currentPath"
+      :is-mobile="false"
       @close="showAddEditModal = false"
-      @save-success="() => { favoritePathsStore.fetchFavoritePaths(t); showAddEditModal = false; }"
     />
-  </div> 
+  </Teleport>
 </template>
 
-
+<style scoped>
+.fav-rand, .fav-rand .fav-path { color: #1f2937 !important; }
+.fav-rand span:first-child { color: #111827 !important; }
+</style>

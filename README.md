@@ -3,9 +3,11 @@
 
 <div align="center">
 
-[![Docker](https://img.shields.io/badge/-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/xvzu/nexus-terminal) [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-4CAF50?style=flat-square)](https://github.com/xvzu/nexus-terminal/blob/main/LICENSE)
+[![Docker](https://img.shields.io/badge/-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)][docker-url] [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-4CAF50?style=flat-square)](https://github.com/Heavrnl/nexus-terminal/blob/main/LICENSE)
 <br>
 [中文](./README.md) | [English](./doc/README_EN.md)
+
+[docker-url]: https://hub.docker.com/r/heavrnl/nexus-terminal-frontend
 
 </div>
 
@@ -54,161 +56,87 @@
 ---
 
 
+## 🖥️ 桌面端
+
+> 移除了web端的特有功能，如各种登录验证，会话挂起等功能
+
+https://github.com/Heavrnl/nexus-terminal/releases/latest
+
 ## 🚀 快速开始
 
-部署共 7 步：克隆 → 环境变量 → IPv6（可选） → 反代 → 启动。
+### 1️⃣ 配置环境
 
----
+> 建议在 Debian（AMD64 架构）环境中部署，因本人无 ARM 设备，无法保证其兼容性。
 
-### 1️⃣ 克隆仓库
-
+新建文件夹
 ```bash
-git clone https://github.com/xvzu/nexus-terminal.git
-cd nexus-terminal
-
-# 创建数据目录（存储数据库、会话文件等）
-mkdir -p ./data
+mkdir ./nexus-terminal && cd ./nexus-terminal
 ```
 
-> **注意**：`data/` 目录用于持久化存储（SQLite 数据库、session 文件、自动生成的密钥等），请定期备份。
 
-目录结构：
-```
-nexus-terminal/
-├── docker-compose.yml       # 容器编排，已配置构建上下文和 IPv6 网络
-├── .env                     # 环境变量配置
-├── .env.example             # 环境变量示例（含注释说明）
-├── data/                    # 数据持久化目录（数据库、密钥等）
-├── scripts/
-│   └── setup-docker-ipv6.sh # Docker IPv6 一键配置脚本
-└── packages/
-    ├── backend/             # Node.js 后端（SSH/SFTP/WebSocket）
-    ├── frontend/            # Vue 前端 + 内部 nginx
-    └── remote-gateway/      # RDP/VNC 网关
-```
-
----
-
-### 2️⃣ 配置环境变量
-
-参考 `.env.example` 创建 `.env`（如已存在则跳过）：
+下载仓库中的 [**docker-compose.yml**](https://raw.githubusercontent.com/Heavrnl/nexus-terminal/refs/heads/main/docker-compose.yml) 和 [**.env**](https://raw.githubusercontent.com/Heavrnl/nexus-terminal/refs/heads/main/.env) 文件到当前目录。
 ```bash
-cp -n .env.example .env
+wget https://raw.githubusercontent.com/Heavrnl/nexus-terminal/refs/heads/main/docker-compose.yml -O docker-compose.yml && wget https://raw.githubusercontent.com/Heavrnl/nexus-terminal/refs/heads/main/.env -O .env
 ```
-
-关键变量说明：
-
-| 变量 | 是否必改 | 说明 |
-|------|----------|------|
-| `RP_ID` | 如需 Passkey 登录 | 你的域名，如 `example.com` |
-| `RP_ORIGIN` | 如需 Passkey 登录 | 你的完整前端地址，如 `https://example.com` |
-
-> 不需要 Passkey 时可以保持默认，不影响 SSH/SFTP/RDP 等核心功能。
+> ⚠️ **注意：**
 >
-> `ENCRYPTION_KEY` 和 `SESSION_SECRET` 会在首次启动时**自动生成**并保存到 `data/.env`，请备份该文件。
+> * **arm64 用户**请将 `docker-compose.yml` 中的镜像 `guacamole/guacd:latest` 替换为 `guacamole/guacd:1.6.0-RC1`。
+> * **armv7 用户**请参考下方注意事项。
 
----
 
-### 3️⃣ 配置 Docker IPv6（可选）
 
-如果你需要通过容器 **连接 IPv6 服务器**（比如 SSH 到 IPv6 地址），才需要这一步。
 
-只需要在每台机器上**执行一次**：
-```bash
-sudo ./scripts/setup-docker-ipv6.sh
-```
-
-脚本会自动完成：
-- 创建 `/etc/docker/daemon.json`（启用 IPv6）
-- 重启 Docker 守护进程
-- 清除旧网络，让 compose 重建时带上 IPv6
-
-> 不需要 IPv6 连接时，直接跳过此步。
-
----
-
-### 6️⃣ 配置宿主机反代
-
-nexus-terminal 的 frontend 容器监听宿主机 **18111** 端口。你需要用 nginx 或 caddy 反向代理到该端口。
-
-#### nginx
-
-在宿主机上新建配置文件（如 `/etc/nginx/sites-available/nexus-terminal.conf`）：
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;  # 改为你的域名
-
-    location / {
-        proxy_pass http://127.0.0.1:18111;
-
-        # WebSocket 支持（必需，否则终端无法连接）
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Range $http_range;
-        proxy_set_header If-Range $http_if_range;
-        proxy_redirect off;
-    }
+配置 nginx
+```conf
+location / {
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header Range $http_range;
+    proxy_set_header If-Range $http_if_range;
+    proxy_redirect off;
+    proxy_pass http://127.0.0.1:18111;
 }
 ```
 
-启用并重载 nginx：
-```bash
-sudo ln -sf /etc/nginx/sites-available/nexus-terminal.conf /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-```
 
-> **注意**：这是修改宿主机的 nginx 配置（`/etc/nginx/`），不是仓库里的文件。
 
-#### Caddy
+为 docker 配置IPv6（可选，如果你不使用ipv6连接服务器可以不配置）
 
-```caddyfile
-your-domain.com {
-    reverse_proxy 127.0.0.1:18111
+在`/etc/docker/daemon.json`加入以下内容
+```json
+{
+  "ipv6": true,
+  "fixed-cidr-v6": "fd00::/80",
+  "ip6tables": true,
+  "experimental": true
 }
 ```
+重启docker服务
+```
+sudo systemctl restart docker
+```
 
----
-
-### 7️⃣ 构建 & 启动
+### 2️⃣ 启动服务
 
 ```bash
 docker compose up -d
 ```
 
-首次运行时会**自动构建镜像**（读取每个服务的 `build:` 配置，从源码编译），启动 4 个容器：
-
-| 容器 | 说明 |
-|------|------|
-| `nexus-terminal-frontend` | 前端界面（nginx, 端口 18111） |
-| `nexus-terminal-backend` | 后端服务（SSH/SFTP API, 端口 3001） |
-| `nexus-terminal-remote-gateway` | RDP/VNC 网关 |
-| `nexus-terminal-guacd` | Guacamole 代理 |
-
-验证是否正常运行：
+### 3️⃣ 更新
+注意：docker-compose 运行不需要拉取仓库源码，除非你打算自己build，否则只需要在项目目录执行以下命令即可更新。
 ```bash
-docker compose ps
-# 所有容器应为 "Up" 状态
+docker compose down
 ```
-
-浏览器访问 `http://your-domain.com`，注册第一个账号即可使用。
-
-> 首次注册的账号会自动成为管理员。
-
----
-
-### 更新
-
 ```bash
-cd nexus-terminal
-git pull                          # 拉取最新代码
-docker compose up -d --build      # 重新构建并启动（--build 强制重新编译）
+docker compose pull
+```
+```bash
+docker compose up -d
 ```
 ## 📚 使用指南
 
@@ -249,12 +177,11 @@ docker compose up -d --build      # 重新构建并启动（--build 强制重新
 1. **移动端可以通过双指手势放大缩小终端字体**
 2. 如需启用 Passkey 登录，请在 `.env` 文件中设置 `RP_ID` 和 `RP_ORIGIN` 环境变量。
 
-
 ## ⚠️ 注意事项
 
 1.  **双文件管理器**：可以在布局中添加两个文件管理器组件（实验性功能，可能存在不稳定情况）。
 2.  **多文本编辑器**：在同一布局中添加多个文本编辑器的功能尚未实现。
-3. ARMv7 用户请使用此处的 [docker-compose.yml](https://github.com/xvzu/nexus-terminal/blob/main/doc/arm/docker-compose.yml)。由于 Apache Guacamole 未提供 guacd 的 ARMv7 架构镜像，所以禁用 RDP 功能，相关镜像暂时不再拉取。
+3. ARMv7 用户请使用此处的 [docker-compose.yml](https://github.com/Heavrnl/nexus-terminal/blob/main/doc/arm/docker-compose.yml)。由于 Apache Guacamole 未提供 guacd 的 ARMv7 架构镜像，所以禁用 RDP 功能，相关镜像暂时不再拉取。
 4. 关于数据备份，请自行备份目录下的 data 文件夹，本项目不提供相关备份功能。
 5. 由于浏览器限制，非https或者localhost无法复制终端内容，请使用https访问
 

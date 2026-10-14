@@ -7,6 +7,7 @@ export interface AppearanceSettings {
   customUiTheme?: string; // CSS 变量 JSON 字符串
   activeTerminalThemeId?: number | null; // 终端主题 ID
   terminalFontFamily?: string;
+  terminalFontFamilyMobile?: string; // 移动端终端字体偏好
   terminalFontSize?: number;
   terminalFontSizeMobile?: number; // 移动端字体大小
   terminalBackgroundImage?: string;
@@ -30,6 +31,10 @@ export interface AppearanceSettings {
   terminalTextShadowOffsetY?: number;
   terminalTextShadowBlur?: number;
   terminalTextShadowColor?: string;
+
+  // 终端关键字高亮规则
+  terminalHighlightEnabled?: boolean;
+  terminalHighlightRules?: string; // JSON 格式存储的 TerminalKeywordHighlightRule 数组
 }
  
 // 前端用于更新外观设置的数据结构 (对应 API 请求体)

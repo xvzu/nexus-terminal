@@ -42,6 +42,25 @@ const initAppearanceSettingsTable = async (db: Database): Promise<void> => {
 };
 
 
+const initCommandHistoryTable = async (db: Database): Promise<void> => {
+    try {
+        await runDb(db, `CREATE INDEX IF NOT EXISTS idx_command_history_command ON command_history(command);`);
+        await runDb(db, `CREATE INDEX IF NOT EXISTS idx_command_history_timestamp ON command_history(timestamp DESC);`);
+    } catch (err: any) {
+        console.error('[DB Init] 创建 command_history 索引失败:', err.message);
+    }
+};
+
+const initQuickCommandsTable = async (db: Database): Promise<void> => {
+    try {
+        await runDb(db, `CREATE INDEX IF NOT EXISTS idx_quick_commands_name ON quick_commands(name);`);
+        await runDb(db, `CREATE INDEX IF NOT EXISTS idx_quick_commands_usage_count ON quick_commands(usage_count DESC);`);
+        await runDb(db, `CREATE INDEX IF NOT EXISTS idx_qc_tag_associations_tag_id ON quick_command_tag_associations(tag_id);`);
+    } catch (err: any) {
+        console.error('[DB Init] 创建 quick_commands 索引失败:', err.message);
+    }
+};
+
 // --- Table Definitions Registry ---
 
 /**
@@ -71,9 +90,17 @@ export const tableDefinitions: TableDefinition[] = [
 
     // Other utilities
     { name: 'ip_blacklist', sql: schemaSql.createIpBlacklistTableSQL },
-    { name: 'command_history', sql: schemaSql.createCommandHistoryTableSQL },
+    {
+        name: 'command_history',
+        sql: schemaSql.createCommandHistoryTableSQL,
+        init: initCommandHistoryTable
+    },
     { name: 'path_history', sql: schemaSql.createPathHistoryTableSQL },
-    { name: 'quick_commands', sql: schemaSql.createQuickCommandsTableSQL },
+    {
+        name: 'quick_commands',
+        sql: schemaSql.createQuickCommandsTableSQL,
+        init: initQuickCommandsTable
+    },
     { name: 'favorite_paths', sql: schemaSql.createFavoritePathsTableSQL }, // Added Favorite Paths table
 
     // Appearance related tables (often depend on others or have init logic)
@@ -87,4 +114,24 @@ export const tableDefinitions: TableDefinition[] = [
         sql: schemaSql.createAppearanceSettingsTableSQL,
         init: initAppearanceSettingsTable
      }, // Depends on terminal_themes
+    {
+        name: 'workspace_sync',
+        sql: schemaSql.createWorkspaceSyncTableSQL
+    },
+    {
+        name: 'sync_tombstones',
+        sql: schemaSql.createSyncTombstonesTableSQL
+    },
+    {
+        name: 'file_color_highlights',
+        sql: schemaSql.createFileColorHighlightsTableSQL,
+        init: async (db: Database): Promise<void> => {
+            try {
+                await runDb(db, `CREATE INDEX IF NOT EXISTS idx_file_color_highlights_conn ON file_color_highlights(connection_id);`);
+                await runDb(db, `CREATE UNIQUE INDEX IF NOT EXISTS idx_file_color_highlights_conn_path ON file_color_highlights(connection_id, path);`);
+            } catch (err: any) {
+                console.error('[DB Init] 创建 file_color_highlights 索引失败:', err.message);
+            }
+        }
+    },
 ];

@@ -16,6 +16,8 @@ export interface FileListItem {
     filename: string; // 文件或目录名
     longname: string; // ls -l 风格的长名称字符串
     attrs: FileAttributes; // 文件属性
+    _justAdded?: number; // 增量变动：新添加文件的时间戳标记（用于平滑过渡动画）
+    _justUpdated?: number; // 增量变动：属性/内容更新的时间戳标记（用于平滑过渡动画）
 }
 
 // 类型定义：用于编辑器文件内容和编码 (从 useFileEditor 迁移)
@@ -38,3 +40,6 @@ export interface SftpReadFileSuccessPayload {
     rawContentBase64: string; // Base64 编码的原始文件内容
     encodingUsed: string; // 后端自动检测或用户请求时实际使用的编码
 }
+
+// 文件管理器与终端路径同步模式
+export type TerminalSyncMode = 'off' | 'bidirectional' | 'to_terminal' | 'from_terminal';

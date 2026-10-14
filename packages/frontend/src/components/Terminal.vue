@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick, watchEffect } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, watchEffect } from 'vue';
 import { Terminal, ITerminalAddon, IDisposable } from 'xterm';
 import { useDeviceDetection } from '../composables/useDeviceDetection';
 import { useAppearanceStore } from '../stores/appearance.store';
@@ -9,8 +9,16 @@ import { storeToRefs } from 'pinia';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import { SearchAddon, type ISearchOptions } from '@xterm/addon-search';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import 'xterm/css/xterm.css';
+import MobileTerminalScrollbar from './MobileTerminalScrollbar.vue';
+import TerminalContextMenu, { type TerminalMenuAction } from './TerminalContextMenu.vue';
+import { useFileEditorStore, type FileInfo } from '../stores/fileEditor.store';
 import { useWorkspaceEventEmitter, useWorkspaceEventSubscriber, useWorkspaceEventOff } from '../composables/workspaceEvents'; // +++ Import subscriber and off
+import { useTerminalHighlightStore } from '../stores/terminal-highlight.store';
+
+const highlightStore = useTerminalHighlightStore();
 
 
 // 定义 props 和 emits
@@ -32,6 +40,7 @@ const terminalOuterWrapperRef = ref<HTMLElement | null>(null); // 最外层容�
 let terminal: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let searchAddon: SearchAddon | null = null; // *** 添加 searchAddon 变量 ***
+let serializeAddon: SerializeAddon | null = null; // 官方序列化插件，用于保存完整 ANSI 颜色与样式
 let resizeObserver: ResizeObserver | null = null;
 let observedElement: HTMLElement | null = null; // +++ Store the observed element +++
 let debounceTimer: number | null = null; // 用于防抖的计时器 ID
@@ -69,10 +78,13 @@ const isTerminalDomReady = ref(false);
 // --- Settings Store ---
 const settingsStore = useSettingsStore(); // +++ 实例化设置 store +++
 const sessionStore = useSessionStore(); // +++ 实例化会话 store +++
+const fileEditorStore = useFileEditorStore(); // 实例化文本编辑器 store
 const {
   autoCopyOnSelectBoolean,
   terminalScrollbackLimitNumber, 
-  terminalEnableRightClickPasteBoolean, 
+  terminalEnableRightClickPasteBoolean,
+  terminalRightClickBehaviorString,
+  terminalNoWrapBoolean, 
 } = storeToRefs(settingsStore); 
 
 // 防抖函数
@@ -104,33 +116,29 @@ const debouncedEmitResize = debounce((term: Terminal) => {
     }
 }, 150); // 150ms 防抖延迟
 
+// 计算终端尺寸 (支持“不换行”模式下超宽列数)
+const calculateTerminalDimensions = (term: Terminal) => {
+  const proposed = fitAddon?.proposeDimensions();
+  const rows = proposed?.rows || term.rows;
+  const visualCols = proposed?.cols || term.cols;
+  // 开启不换行模式时提供充足列宽 (至少 500 列)，内容超出通过横向滚动条查看
+  const cols = terminalNoWrapBoolean.value ? Math.max(500, visualCols) : visualCols;
+  return { cols, rows };
+};
+
 // 立即执行 Fit 并发送 Resize 的函数
 const fitAndEmitResizeNow = (term: Terminal) => {
-    // terminalRef 现在指向内部容器，检查它即可
     if (!term || !terminalRef.value) return;
     try {
-        // 确保容器可见且有尺寸
         if (terminalRef.value.offsetHeight > 0 && terminalRef.value.offsetWidth > 0) {
-            fitAddon?.fit();
-            const dimensions = { cols: term.cols, rows: term.rows };
-            emitWorkspaceEvent('terminal:resize', { sessionId: props.sessionId, dims: dimensions });
-            // 发出稳定尺寸事件
+            const dims = calculateTerminalDimensions(term);
+            term.resize(dims.cols, dims.rows);
+            emitWorkspaceEvent('terminal:resize', { sessionId: props.sessionId, dims });
             if (terminalRef.value) {
               const stableWidth = terminalRef.value.offsetWidth;
               const stableHeight = terminalRef.value.offsetHeight;
               emitWorkspaceEvent('terminal:stabilizedResize', { sessionId: props.sessionId, width: stableWidth, height: stableHeight });
             }
-
-            
-            // 使用 nextTick 确保 fit() 的效果已反映，再触发 resize
-            nextTick(() => {
-                // 再次检查终端实例是否仍然存在
-                // terminalRef 现在指向内部容器
-                if (terminal && terminalRef.value) {
-                    console.log(`[Terminal ${props.sessionId}] Triggering window resize event after immediate fit.`);
-                    window.dispatchEvent(new Event('resize'));
-                }
-            });
         } else {
              console.log(`[Terminal ${props.sessionId}] Immediate fit skipped (container not visible or has no dimensions).`);
         }
@@ -163,34 +171,184 @@ const getScrollbackValue = (limit: number): number => {
   return Math.max(0, limit); // Ensure non-negative, return the number otherwise
 };
 
-// --- 右键粘贴功能 ---
-const handleContextMenuPaste = async (event: MouseEvent) => {
-  event.preventDefault(); // 阻止默认右键菜单
+// --- 终端右键交互与上下文菜单 ---
+const showContextMenu = ref(false);
+const contextMenuPosition = ref({ x: 0, y: 0 });
+const contextMenuSelectedText = ref('');
+
+const executePaste = async () => {
   try {
     const text = await navigator.clipboard.readText();
     if (text && terminal) {
-      const processedText = text.replace(/\r\n?/g, '\n');
-      emitWorkspaceEvent('terminal:input', { sessionId: props.sessionId, data: processedText });
+      terminal.focus();
+      terminal.paste(text);
     }
   } catch (err) {
-    console.error('[Terminal] Failed to paste via Right Click:', err);
+    console.error('[Terminal] Failed to paste:', err);
   }
+};
+
+const executeCopy = async (text: string) => {
+  try {
+    if (text) {
+      await navigator.clipboard.writeText(text);
+    }
+  } catch (err) {
+    console.error('[Terminal] Failed to copy:', err);
+  }
+};
+
+const executeOpenPath = (pathText: string) => {
+  const cleanPath = pathText.trim().replace(/^['"]|['"]$/g, '');
+  if (!cleanPath) return;
+  emitWorkspaceEvent('fileManager:navigateToPath', {
+    path: cleanPath,
+    sessionId: props.sessionId,
+  });
+};
+
+const executeOpenFile = (filePathText: string) => {
+  const cleanPath = filePathText.trim().replace(/^['"]|['"]$/g, '');
+  if (!cleanPath) return;
+  const fileName = cleanPath.substring(cleanPath.lastIndexOf('/') + 1) || cleanPath;
+  const fileInfo: FileInfo = { name: fileName, fullPath: cleanPath };
+
+  if (settingsStore.showPopupFileEditorBoolean) {
+    fileEditorStore.triggerPopup(cleanPath, props.sessionId);
+  }
+
+  if (settingsStore.shareFileEditorTabsBoolean) {
+    fileEditorStore.openFile(cleanPath, props.sessionId, 'terminal');
+  } else {
+    sessionStore.openFileInSession(props.sessionId, fileInfo);
+  }
+};
+
+const executeSaveQuickCommand = (cmdText: string) => {
+  const cleanCmd = cmdText.trim();
+  if (!cleanCmd) return;
+  emitWorkspaceEvent('quickCommand:requestAdd', {
+    initialCommand: cleanCmd,
+  });
+};
+
+const handleContextMenu = async (event: MouseEvent) => {
+  const behavior = terminalRightClickBehaviorString.value;
+  if (behavior === 'none') {
+    event.preventDefault();
+    return;
+  }
+
+  event.preventDefault();
+  const selection = terminal?.getSelection()?.trim() || '';
+
+  if (behavior === 'paste') {
+    await executePaste();
+    return;
+  }
+  if (behavior === 'copy') {
+    if (selection) await executeCopy(selection);
+    return;
+  }
+  if (behavior === 'openPath') {
+    if (selection) executeOpenPath(selection);
+    return;
+  }
+  if (behavior === 'openFile') {
+    if (selection) executeOpenFile(selection);
+    return;
+  }
+  if (behavior === 'saveQuickCommand') {
+    if (selection) executeSaveQuickCommand(selection);
+    return;
+  }
+
+  // 默认模式：behavior === 'contextMenu'
+  // 核心铁律：未选中文本直接粘贴；选中文本弹出右键菜单
+  if (!selection) {
+    await executePaste();
+  } else {
+    contextMenuSelectedText.value = selection;
+    contextMenuPosition.value = { x: event.clientX, y: event.clientY };
+    showContextMenu.value = true;
+  }
+};
+
+const handleContextMenuAction = async (action: TerminalMenuAction) => {
+  const selection = contextMenuSelectedText.value || terminal?.getSelection()?.trim() || '';
+  switch (action) {
+    case 'copy':
+      if (selection) await executeCopy(selection);
+      if (terminal) terminal.focus();
+      break;
+    case 'paste':
+      await executePaste();
+      break;
+    case 'openPath':
+      if (selection) executeOpenPath(selection);
+      break;
+    case 'openFile':
+      if (selection) executeOpenFile(selection);
+      break;
+    case 'saveQuickCommand':
+      if (selection) executeSaveQuickCommand(selection);
+      break;
+  }
+  showContextMenu.value = false;
 };
 
 const addContextMenuListener = () => {
   if (terminalRef.value) {
-    terminalRef.value.addEventListener('contextmenu', handleContextMenuPaste);
+    terminalRef.value.addEventListener('contextmenu', handleContextMenu);
   }
 };
 
 const removeContextMenuListener = () => {
   if (terminalRef.value) {
-    terminalRef.value.removeEventListener('contextmenu', handleContextMenuPaste);
+    terminalRef.value.removeEventListener('contextmenu', handleContextMenu);
   }
 };
 
 
-// --- 移动端模式下通过双指放大缩小终端字号 ---
+// --- 移动端模式下触摸控制与右侧悬浮滚动条 ---
+const canScroll = ref(false);
+const scrollProgress = ref(1); // 0 (顶部历史) 到 1 (底部最新输出)
+const thumbHeightRatio = ref(0.2);
+
+// 计算当前文本是否超出视口并刷新进度
+const updateScrollState = () => {
+  if (!terminal) {
+    canScroll.value = false;
+    return;
+  }
+  const buffer = terminal.buffer.active;
+  const baseY = buffer.baseY;
+  const rows = terminal.rows;
+
+  // 当 baseY > 0 说明存在历史回滚行，即文本超出了当前终端视口
+  if (baseY > 0) {
+    canScroll.value = true;
+    const viewportY = buffer.viewportY;
+    scrollProgress.value = Math.min(1, Math.max(0, viewportY / baseY));
+    const totalLines = baseY + rows;
+    thumbHeightRatio.value = Math.min(1, Math.max(0.08, rows / totalLines));
+  } else {
+    canScroll.value = false;
+    scrollProgress.value = 1;
+    thumbHeightRatio.value = 1;
+  }
+};
+
+// 移动端悬浮滚动条拖拽滚动进度变更
+const handleScrollProgressChange = (progress: number) => {
+  if (!terminal) return;
+  const baseY = terminal.buffer.active.baseY;
+  const targetLine = Math.round(progress * baseY);
+  terminal.scrollToLine(targetLine);
+  updateScrollState();
+};
+
+// --- 移动端双指缩放字号 ---
 const getDistanceBetweenTouches = (touches: TouchList): number => {
   const touch1 = touches[0];
   const touch2 = touches[1];
@@ -202,6 +360,7 @@ const getDistanceBetweenTouches = (touches: TouchList): number => {
 
 const handleTouchStart = (event: TouchEvent) => {
   if (event.touches.length === 2 && terminal) {
+    // 双指捏合：准备缩放字号
     event.preventDefault(); 
     initialPinchDistance = getDistanceBetweenTouches(event.touches);
     currentFontSizeOnPinchStart = terminal.options.fontSize || currentTerminalFontSize.value;
@@ -210,6 +369,7 @@ const handleTouchStart = (event: TouchEvent) => {
 
 const handleTouchMove = (event: TouchEvent) => {
   if (event.touches.length === 2 && terminal && initialPinchDistance > 0) {
+    // 双指缩放
     event.preventDefault();
     const currentDistance = getDistanceBetweenTouches(event.touches);
     if (currentDistance > 0) {
@@ -221,7 +381,7 @@ const handleTouchMove = (event: TouchEvent) => {
       if (newSize !== currentTerminalOptFontSize) {
         terminal.options.fontSize = newSize;
         fitAndEmitResizeNow(terminal);
-        debouncedSaveFontSize(newSize); // 使用新的区分设备的保存函数
+        debouncedSaveFontSize(newSize);
       }
     }
   }
@@ -229,7 +389,7 @@ const handleTouchMove = (event: TouchEvent) => {
 
 const handleTouchEnd = (event: TouchEvent) => {
   if (event.touches.length < 2) {
-    initialPinchDistance = 0; // Reset pinch distance
+    initialPinchDistance = 0;
   }
 };
 
@@ -245,21 +405,30 @@ onMounted(() => {
       rows: 24, // 初始行数
       cols: 80, // 初始列数
       allowTransparency: true,
+      allowProposedApi: true, // 必须开启以支持 Unicode 11 和高级扩展
       disableStdin: false,
-      convertEol: true,
+      convertEol: false, // 禁用 convertEol，保持规范的 VT100/ANSI 光标控制，防止 TUI (如 agy cli) 渲染错位
+      rescaleOverlappingGlyphs: true, // 允许特殊字符与宽字符自动缩放，防止字形溢出
+      letterSpacing: 0,
+      lineHeight: 1.1,
       scrollback: getScrollbackValue(terminalScrollbackLimitNumber.value), //  Use setting from store
       scrollOnUserInput: true, // 输入时滚动到底部
       ...props.options, // 合并外部传入的选项
-    });
+    } as any);
     
     // 注意: 终端数据的解码已在useSshTerminal.ts中进行处理
 
     // 加载插件
     fitAddon = new FitAddon();
     searchAddon = new SearchAddon(); // *** 创建 SearchAddon 实例 ***
+    serializeAddon = new SerializeAddon(); // *** 创建 SerializeAddon 实例 ***
+    const unicode11Addon = new Unicode11Addon(); // 支持 Unicode 11 现代宽字符规范
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(new WebLinksAddon());
     terminal.loadAddon(searchAddon); // *** 加载 SearchAddon ***
+    terminal.loadAddon(unicode11Addon);
+    terminal.loadAddon(serializeAddon); // *** 加载 SerializeAddon ***
+    terminal.unicode.activeVersion = '11'; // 激活 Unicode 11 版本支持
 
     // 将终端附加到 DOM
     terminal.open(terminalRef.value);
@@ -268,12 +437,32 @@ onMounted(() => {
     console.log(`[Terminal ${props.sessionId}] Xterm open() called, considering DOM ready for initial style checks.`);
  
     // 适应容器大小
-    fitAddon.fit();
+    const initDims = calculateTerminalDimensions(terminal);
+    terminal.resize(initDims.cols, initDims.rows);
     emitWorkspaceEvent('terminal:resize', { sessionId: props.sessionId, dims: { cols: terminal.cols, rows: terminal.rows } }); // 触发初始 resize 事件
 
     // 监听用户输入
     terminal.onData((data) => {
       emitWorkspaceEvent('terminal:input', { sessionId: props.sessionId, data });
+    });
+
+    // 监听 OSC 7 当前工作目录通告序列 (Operating System Command 7: CWD)
+    // 格式形如: file://hostname/path/to/dir 或 /path/to/dir
+    terminal.parser.registerOscHandler(7, (data: string) => {
+      try {
+        let path = data.trim();
+        if (path.startsWith('file://')) {
+          const urlStr = path.replace(/^file:\/\/[^\/]*/, '');
+          path = urlStr ? decodeURIComponent(urlStr) : '/';
+        }
+        if (path && path.startsWith('/')) {
+          console.log(`[Terminal ${props.sessionId}] 捕获到 OSC 7 工作目录通告: ${path}`);
+          emitWorkspaceEvent('terminal:cwdChanged', { sessionId: props.sessionId, cwd: path });
+        }
+      } catch (err) {
+        console.warn(`[Terminal ${props.sessionId}] 解析 OSC 7 序列失败:`, err, data);
+      }
+      return true; // 返回 true 表示已消费此 OSC，不向屏幕输出控制码
     });
 
     // 监听终端大小变化 (通过 ResizeObserver) - 主要处理浏览器窗口大小变化等
@@ -317,7 +506,8 @@ onMounted(() => {
 
             if (rectHeight > 0 && rectWidth > 0) {
                 try {
-                  fitAddon?.fit();
+                  const dims = calculateTerminalDimensions(terminal);
+                  terminal.resize(dims.cols, dims.rows);
                   debouncedEmitResize(terminal); // This will log the cols/rows after debouncing
                   emitWorkspaceEvent('terminal:stabilizedResize', { sessionId: props.sessionId, width: roundedWidth, height: roundedHeight });
                  } catch (e) {
@@ -346,18 +536,15 @@ onMounted(() => {
                 } catch (e) {
                      console.warn(`[Terminal ${props.sessionId}] Error observing element:`, e);
                 }
-                // Perform fit after a delay to ensure visibility and layout stability
+                // 在 DOM 更新后立即执行 fit 并聚焦，消除 50ms 延迟
                 nextTick(() => {
-                    setTimeout(() => {
-                        // 检查内部容器 terminalRef
-                        if (props.isActive && terminal && terminalRef.value && terminalRef.value.offsetHeight > 0) {
-                            fitAndEmitResizeNow(terminal);
-                            // Also ensure focus when becoming active
+                    if (props.isActive && terminal && terminalRef.value && terminalRef.value.offsetHeight > 0) {
+                        fitAndEmitResizeNow(terminal);
+                        // 移动端不自动聚焦，避免每次激活会话自动弹起输入法
+                        if (!isMobile.value) {
                             terminal.focus();
-                        } else {
-                            console.log(`[Terminal ${props.sessionId}] Skipped delayed fit (inactive, destroyed, or not visible).`);
                         }
-                    }, 50); // 50ms delay
+                    }
                 });
             } else {
                 // --- Become Inactive ---
@@ -386,7 +573,7 @@ onMounted(() => {
             const { done, value } = await reader.read();
             if (done) break;
             if (terminal && value) {
-              terminal.write(value); // 将流数据写入终端
+              terminal.write(highlightStore.highlight(value)); // 将流数据写入终端
               // 移除此处不必要的 fit() 调用
             }
           }
@@ -398,9 +585,14 @@ onMounted(() => {
       }
     }, { immediate: true }); // 立即执行一次 watch
 
-    // 触发 ready 事件，传递 sessionId, terminal 和 searchAddon 实例
+    // 触发 ready 事件，传递 sessionId, terminal, searchAddon 和 serializeAddon 实例
     if (terminal) {
-        emitWorkspaceEvent('terminal:ready', { sessionId: props.sessionId, terminal: terminal, searchAddon: searchAddon });
+        emitWorkspaceEvent('terminal:ready', {
+          sessionId: props.sessionId,
+          terminal: terminal,
+          searchAddon: searchAddon,
+          serializeAddon: serializeAddon,
+        });
     }
 
     // --- 监听并处理选中即复制 ---
@@ -440,6 +632,17 @@ onMounted(() => {
     });
 
     // --- 监听外观变化 ---
+    watch(terminalNoWrapBoolean, (noWrap) => {
+      if (terminal && terminalRef.value && props.isActive) {
+        console.log(`[Terminal ${props.sessionId}] terminalNoWrap changed to ${noWrap}, updating terminal dimensions.`);
+        nextTick(() => {
+          if (terminal) {
+            fitAndEmitResizeNow(terminal);
+          }
+        });
+      }
+    });
+
     watch(effectiveTerminalTheme, (newTheme) => { // Changed from currentTerminalTheme
       if (terminal) {
         console.log(`[Terminal ${props.sessionId}] 应用新终端主题 (effective)。`);
@@ -475,8 +678,8 @@ onMounted(() => {
         }
     });
 
-    // 聚焦终端 (添加 null check)
-    if (terminal) {
+    // 聚焦终端 (仅桌面端自动聚焦，避免手机端打开新会话时自动弹出输入法)
+    if (terminal && !isMobile.value) {
         terminal.focus();
     }
 
@@ -504,9 +707,8 @@ onMounted(() => {
                 event.stopPropagation();
                 try {
                     const text = await navigator.clipboard.readText();
-                    if (text) {
-                        const processedText = text.replace(/\r\n?/g, '\n');
-                        emitWorkspaceEvent('terminal:input', { sessionId: props.sessionId, data: processedText });
+                    if (text && terminal) {
+                        terminal.paste(text);
                     }
                 } catch (err) {
                     console.error('[Terminal] Failed to paste via Ctrl+Shift+V:', err);
@@ -517,14 +719,15 @@ onMounted(() => {
         });
     }
 
-    // 根据初始设置添加监听器
-    if (terminalEnableRightClickPasteBoolean.value) {
+    // 根据初始设置添加右键交互监听器
+    if (terminalRightClickBehaviorString.value !== 'none') {
       addContextMenuListener();
     }
 
-    // 监听设置变化
-    watch(terminalEnableRightClickPasteBoolean, (newValue) => {
-      if (newValue) {
+    // 监听右键设置变化
+    watch(terminalRightClickBehaviorString, (newValue) => {
+      if (newValue !== 'none') {
+        removeContextMenuListener();
         addContextMenuListener();
       } else {
         removeContextMenuListener();
@@ -571,6 +774,21 @@ onMounted(() => {
       terminalRef.value.addEventListener('touchcancel', handleTouchEnd, { passive: false }); // Also handle cancel
     }
 
+    // 监听终端滚动、输出解析与尺寸变化，动态刷新滚动条显示与位置
+    if (terminal) {
+      terminal.onScroll(() => {
+        updateScrollState();
+      });
+      terminal.onWriteParsed(() => {
+        updateScrollState();
+      });
+      terminal.onResize(() => {
+        updateScrollState();
+      });
+      nextTick(() => {
+        updateScrollState();
+      });
+    }
 
   }
 });
@@ -590,6 +808,15 @@ onBeforeUnmount(() => {
   }
   resizeObserver = null;
   observedElement = null;
+
+  if (serializeAddon) {
+    try {
+      serializeAddon.dispose();
+    } catch (e) {
+      // ignore
+    }
+    serializeAddon = null;
+  }
 
   if (terminal) {
     console.log(`[Terminal ${props.sessionId}] Disposing terminal instance.`);
@@ -620,7 +847,7 @@ onBeforeUnmount(() => {
   });
 // 暴露 write 方法给父组件 (可选)
 const write = (data: string | Uint8Array) => {
-    terminal?.write(data);
+    terminal?.write(highlightStore.highlight(data));
 };
 
 // *** 暴露搜索方法 ***
@@ -714,13 +941,118 @@ watchEffect(() => {
     });
   }
 });
- 
+
+// --- 支持拖拽文件/文件夹直接在终端输入路径 ---
+const isDraggingOverTerminal = ref(false);
+
+const handleTerminalDragEnter = (event: DragEvent) => {
+  if (event.dataTransfer?.types.includes('text/plain') || event.dataTransfer?.types.includes('Files') || event.dataTransfer?.types.includes('application/x-nexus-sftp-items')) {
+    event.preventDefault();
+    isDraggingOverTerminal.value = true;
+  }
+};
+
+const handleTerminalDragOver = (event: DragEvent) => {
+  if (event.dataTransfer?.types.includes('text/plain') || event.dataTransfer?.types.includes('Files') || event.dataTransfer?.types.includes('application/x-nexus-sftp-items')) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    isDraggingOverTerminal.value = true;
+  }
+};
+
+const handleTerminalDragLeave = (event: DragEvent) => {
+  const related = event.relatedTarget as Node | null;
+  if (!terminalOuterWrapperRef.value || !related || !terminalOuterWrapperRef.value.contains(related)) {
+    isDraggingOverTerminal.value = false;
+  }
+};
+
+const handleTerminalDrop = (event: DragEvent) => {
+  isDraggingOverTerminal.value = false;
+  event.preventDefault();
+
+  // 1. 优先读取 text/plain（FileManager 会放入带引号的绝对路径，格式如 "/var/log/nginx" ）
+  let textToInsert = event.dataTransfer?.getData('text/plain') || '';
+
+  // 2. 如果是从外部拖拽的文件，拼接其文件名并加上空格
+  if (!textToInsert && event.dataTransfer?.files && event.dataTransfer.files.length > 0) {
+    textToInsert = Array.from(event.dataTransfer.files).map(f => `"${f.name}"`).join(' ') + ' ';
+  }
+
+  if (textToInsert) {
+    // 像用户打字一样，直接发送到终端
+    const activeSession = sessionStore.sessions.get(props.sessionId);
+    if (activeSession?.terminalManager) {
+      activeSession.terminalManager.sendData(textToInsert);
+    } else {
+      emitWorkspaceEvent('terminal:input', { sessionId: props.sessionId, data: textToInsert });
+    }
+    // 聚焦回终端
+    terminal?.focus();
+  }
+};
+
+// 移动端：用户主动点击终端画面时才聚焦并唤起软键盘
+const handleTerminalClick = () => {
+  if (isMobile.value && terminal) {
+    terminal.focus();
+  }
+};
 </script>
 
 <template>
-  <div ref="terminalOuterWrapperRef" class="terminal-outer-wrapper">
-    <!-- xterm 实际挂载点 -->
-    <div ref="terminalRef" class="terminal-inner-container"></div>
+  <div
+    ref="terminalOuterWrapperRef"
+    class="terminal-outer-wrapper transition-all duration-150 relative"
+    :class="{
+      'ring-2 ring-primary ring-inset': isDraggingOverTerminal,
+      'is-mobile': isMobile
+    }"
+    @click="handleTerminalClick"
+    @dragenter="handleTerminalDragEnter"
+    @dragover="handleTerminalDragOver"
+    @dragleave="handleTerminalDragLeave"
+    @drop="handleTerminalDrop"
+  >
+    <!-- 拖拽悬停视觉提示 -->
+    <div
+      v-if="isDraggingOverTerminal"
+      class="absolute inset-0 z-50 flex items-center justify-center bg-primary/10 pointer-events-none backdrop-blur-[1px]"
+    >
+      <div class="px-3.5 py-1.5 rounded-lg bg-header/90 border border-primary/50 text-foreground text-xs font-mono shadow-xl flex items-center gap-2">
+        <i class="fas fa-terminal text-primary animate-pulse"></i>
+        <span>松开在终端中输入绝对路径</span>
+      </div>
+    </div>
+
+    <!-- 内部横向滚动视口容器 (与右侧悬浮滚动条解耦，横向滑动时不漂移) -->
+    <div
+      class="terminal-scroll-viewport"
+      :class="{ 'no-wrap': terminalNoWrapBoolean }"
+    >
+      <!-- xterm 实际挂载点 -->
+      <div ref="terminalRef" class="terminal-inner-container"></div>
+    </div>
+
+    <!-- 移动端专属右侧悬浮滚动条 (独立解耦组件) -->
+    <MobileTerminalScrollbar
+      v-if="isMobile && canScroll"
+      :can-scroll="canScroll"
+      :scroll-progress="scrollProgress"
+      :thumb-height-ratio="thumbHeightRatio"
+      @scroll-progress="handleScrollProgressChange"
+    />
+
+    <!-- 终端右键菜单 -->
+    <TerminalContextMenu
+      :visible="showContextMenu"
+      :x="contextMenuPosition.x"
+      :y="contextMenuPosition.y"
+      :selected-text="contextMenuSelectedText"
+      :menu-config="settingsStore.terminalContextMenuItemsObject"
+      @select="handleContextMenuAction"
+      @close="showContextMenu = false"
+    />
   </div>
 </template>
 
@@ -730,6 +1062,24 @@ watchEffect(() => {
   height: 100%;
   overflow: hidden;
   position: relative;
+}
+
+.terminal-scroll-viewport {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.terminal-scroll-viewport.no-wrap {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+.terminal-scroll-viewport.no-wrap .terminal-inner-container {
+  width: max-content !important;
+  min-width: 100% !important;
 }
 
 .terminal-inner-container {
@@ -758,9 +1108,16 @@ watchEffect(() => {
   text-shadow: var(--terminal-shadow);
 }
 
-/*
-  移除以下样式，因为它依赖于本组件内部管理的 .has-terminal-background 类，
-  该逻辑已移至 LayoutRenderer.vue
-*/
+/* 移动端终端隐藏原生浏览器粗糙滚动条，由移动端专属胶囊滚动条统一呈现 */
+.terminal-outer-wrapper.is-mobile :deep(.xterm-viewport) {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+.terminal-outer-wrapper.is-mobile :deep(.xterm-viewport::-webkit-scrollbar) {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
 </style>
 

@@ -37,11 +37,11 @@ export const useDialogStore = defineStore('dialog', () => {
       ...defaultState,
       ...options,
       visible: true,
-      isLoading: false,
+      isLoading: false, // Reset loading state
     };
     return new Promise((resolve, reject) => {
       state.value.resolvePromise = resolve;
-      state.value.rejectPromise = reject;
+      state.value.rejectPromise = reject; // Though typically we resolve false for cancel
     });
   };
 
@@ -50,15 +50,18 @@ export const useDialogStore = defineStore('dialog', () => {
       state.value.resolvePromise(true);
     }
     state.value.visible = false;
+    // No need to reset state here, showDialog will do it
   };
 
   const handleCancel = () => {
-    if (state.value.resolvePromise) {
+    if (state.value.resolvePromise) { // Resolve with false on cancel
       state.value.resolvePromise(false);
     }
     state.value.visible = false;
+    // No need to reset state here, showDialog will do it
   };
   
+  // For actions that might take time, to show a loading spinner on the confirm button
   const setLoading = (loading: boolean) => {
     state.value.isLoading = loading;
   };

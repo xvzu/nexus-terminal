@@ -2,6 +2,7 @@ import * as ConnectionRepository from './connection.repository';
 import { encrypt, decrypt } from '../utils/crypto';
 import { AuditLogService } from '../audit/audit.service';
 import * as SshKeyService from '../ssh_keys/ssh_key.service'; 
+import { recordTombstone } from '../sync/tombstone.service';
 import {
     ConnectionBase,
     ConnectionWithTags,
@@ -91,9 +92,11 @@ export const createConnection = async (input: CreateConnectionInput): Promise<Co
     if (!connectionType || !['SSH', 'RDP', 'VNC'].includes(connectionType)) {
         throw new Error('必须提供有效的连接类型 (SSH, RDP 或 VNC)。');
     }
-    if (!input.host || !input.username) {
-        throw new Error('缺少必要的连接信息 (host, username)。');
+    if (!input.host) {
+        throw new Error('缺少必要的连接信息 (host)。');
     }
+    // 未提供用户名时默认使用 root
+    const effectiveUsername = (input.username && input.username.trim()) ? input.username.trim() : 'root';
     // Type-specific validation using the uppercase version
     if (connectionType === 'SSH') {
         if (!input.auth_method || !['password', 'key'].includes(input.auth_method)) {
@@ -191,7 +194,7 @@ export const createConnection = async (input: CreateConnectionInput): Promise<Co
         type: connectionType,
         host: input.host,
         port: input.port ?? defaultPort, // Use type-specific default port
-        username: input.username,
+        username: effectiveUsername,
         auth_method: authMethodForDb, // Use determined auth method
         encrypted_password: encryptedPassword,
         encrypted_private_key: encryptedPrivateKey, // Null if using ssh_key_id or RDP
@@ -201,6 +204,7 @@ notes: input.notes ?? null, // Add notes field
         proxy_id: input.proxy_id ?? null, // 直接使用输入的 proxy_id
         proxy_type: input.proxy_type ?? null, // 新增 proxy_type
         jump_chain: processedJumpChain,
+        background_color: input.background_color ?? null,
     };
     // Remove ssh_key_id property if it's null before logging/saving if repository expects exact type match without optional nulls
     const finalConnectionData = { ...connectionData };
@@ -279,13 +283,14 @@ export const updateConnection = async (id: number, input: UpdateConnectionInput)
     if (input.type !== undefined && targetType !== currentFullConnection.type) dataToUpdate.type = targetType;
     if (input.host !== undefined) dataToUpdate.host = input.host;
     if (input.port !== undefined) dataToUpdate.port = input.port;
-    if (input.username !== undefined) dataToUpdate.username = input.username;
+    if (input.username !== undefined) dataToUpdate.username = (input.username && input.username.trim()) ? input.username.trim() : 'root';
     if (input.notes !== undefined) dataToUpdate.notes = input.notes; // Add notes update
     // proxy_id 的处理已移至 jump_chain 逻辑块中
     // if (input.proxy_id !== undefined) dataToUpdate.proxy_id = input.proxy_id;
     if (input.proxy_type !== undefined) dataToUpdate.proxy_type = input.proxy_type; // 新增 proxy_type 更新
     // Handle ssh_key_id update (can be set to null or a new ID)
     if (input.ssh_key_id !== undefined) dataToUpdate.ssh_key_id = input.ssh_key_id;
+    if (input.background_color !== undefined) dataToUpdate.background_color = input.background_color;
 
     // 处理认证方法更改或凭证更新 (根据 targetType)
     // Use the validated targetType for logic
@@ -446,6 +451,13 @@ export const updateConnection = async (id: number, input: UpdateConnectionInput)
  * 删除连接
  */
 export const deleteConnection = async (id: number): Promise<boolean> => {
+    try {
+        const existing = await ConnectionRepository.findConnectionByIdWithTags(id);
+        if (existing && (existing as any).uuid) {
+            await recordTombstone('connection', (existing as any).uuid);
+        }
+    } catch (e) {}
+
     const deleted = await ConnectionRepository.deleteConnection(id);
     if (deleted) {
         // 删除成功后记录审计操作
