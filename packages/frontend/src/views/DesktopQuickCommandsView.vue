@@ -70,7 +70,7 @@
                   <div class="flex-1 min-w-0 flex flex-col justify-center gap-0.5 mr-1.5">
                     <div class="flex items-center text-foreground truncate"
                          :style="{ fontSize: `calc(0.82em * max(0.8, var(--qc-row-size-multiplier) * 0.5 + 0.5))` }">
-                      <span class="font-medium truncate">{{ cmd.name || cmd.command }}</span>
+                      <span class="font-bold truncate">{{ cmd.name || cmd.command }}</span>
                     </div>
                     <div v-if="cmd.name && cmd.command"
                          class="truncate font-mono text-text-secondary"
@@ -135,7 +135,7 @@
                 >
                   <div class="flex flex-col overflow-hidden mr-2 flex-grow">
                     <span v-if="cmd.name"
-                          class="font-medium truncate text-foreground mb-0.5"
+                          class="font-bold truncate text-foreground mb-0.5"
                           :style="{ fontSize: `calc(0.875em * max(0.85, var(--qc-row-size-multiplier) * 0.6 + 0.4))` }">{{ cmd.name }}</span>
                     <span v-if="cmd.command"
                           class="truncate font-mono"
@@ -311,7 +311,7 @@
                                 <div class="flex-1 min-w-0 flex flex-col justify-center gap-0.5 mr-1.5">
                                     <div class="flex items-center text-foreground truncate"
                                          :style="{ fontSize: `calc(0.82em * max(0.8, var(--qc-row-size-multiplier) * 0.5 + 0.5))` }">
-                                        <span class="font-medium truncate">{{ cmd.name || cmd.command }}</span>
+                                        <span class="font-bold truncate">{{ cmd.name || cmd.command }}</span>
                                     </div>
                                     <div v-if="cmd.name && cmd.command"
                                          class="truncate font-mono text-text-secondary"
@@ -376,7 +376,7 @@
                             >
                                 <div class="flex flex-col overflow-hidden mr-2 flex-grow">
                                     <span v-if="cmd.name"
-                                          class="font-medium truncate text-foreground mb-0.5"
+                                          class="font-bold truncate text-foreground mb-0.5"
                                           :style="{ fontSize: `calc(0.875em * max(0.85, var(--qc-row-size-multiplier) * 0.6 + 0.4))` }">{{ cmd.name }}</span>
                                     <span v-if="cmd.command"
                                           class="truncate font-mono"
@@ -420,7 +420,7 @@
                         <div class="flex-1 min-w-0 flex flex-col justify-center gap-0.5 mr-1.5">
                             <div class="flex items-center text-foreground truncate"
                                  :style="{ fontSize: `calc(0.82em * max(0.8, var(--qc-row-size-multiplier) * 0.5 + 0.5))` }">
-                                <span class="font-medium truncate">{{ cmd.name || cmd.command }}</span>
+                                <span class="font-bold truncate">{{ cmd.name || cmd.command }}</span>
                             </div>
                             <div v-if="cmd.name && cmd.command"
                                  class="truncate font-mono text-text-secondary"
@@ -485,7 +485,7 @@
                     >
                         <div class="flex flex-col overflow-hidden mr-2 flex-grow">
                             <span v-if="cmd.name"
-                                  class="font-medium truncate text-foreground mb-0.5"
+                                  class="font-bold truncate text-foreground mb-0.5"
                                   :style="{ fontSize: `calc(0.875em * max(0.85, var(--qc-row-size-multiplier) * 0.6 + 0.4))` }">{{ cmd.name }}</span>
                             <span v-if="cmd.command"
                                   class="truncate font-mono"
