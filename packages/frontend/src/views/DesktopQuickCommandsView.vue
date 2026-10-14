@@ -114,7 +114,7 @@
                   @contextmenu.prevent="showQuickCommandContextMenu($event, cmd)"
                   :title="getCommandTooltip(cmd)"
                 >
-                  <span class="truncate max-w-[220px]">{{ cmd.name || cmd.command }}</span>
+                  <span class="truncate max-w-[220px] font-bold">{{ cmd.name || cmd.command }}</span>
                 </div>
               </div>
 
@@ -355,7 +355,7 @@
                                 @contextmenu.prevent="showQuickCommandContextMenu($event, cmd)"
                                 :title="getCommandTooltip(cmd)"
                             >
-                                <span class="truncate max-w-[220px]">{{ cmd.name || cmd.command }}</span>
+                                <span class="truncate max-w-[220px] font-bold">{{ cmd.name || cmd.command }}</span>
                             </div>
                         </div>
 
@@ -464,7 +464,7 @@
                         @contextmenu.prevent="showQuickCommandContextMenu($event, cmd)"
                         :title="getCommandTooltip(cmd)"
                     >
-                        <span class="truncate max-w-[220px]">{{ cmd.name || cmd.command }}</span>
+                        <span class="truncate max-w-[220px] font-bold">{{ cmd.name || cmd.command }}</span>
                     </div>
                 </div>
 
