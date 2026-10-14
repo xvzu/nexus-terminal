@@ -350,17 +350,6 @@ defineExpose({
     class="breadcrumbs-container relative flex items-center h-8 px-2 bg-header/90 border-b border-border/70 text-xs select-none transition-colors duration-150 flex-shrink-0"
     :class="{ 'ring-1 ring-primary/40 border-primary/50': isEditing }"
   >
-    <!-- 最左侧：返回上一级目录按钮 -->
-    <button
-      type="button"
-      class="flex items-center justify-center w-6 h-6 mr-1 rounded-lg text-text-secondary hover:text-foreground hover:bg-black/10 dark:hover:bg-white/10 active:scale-95 transition-all duration-150 disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-secondary flex-shrink-0"
-      @click.stop="handleGoUp"
-      :disabled="!canGoUp"
-      :title="canGoUp ? t('fileManager.actions.parentDirectory', '上一级') : t('fileManager.actions.alreadyRoot', '已是根目录')"
-      aria-label="上一级目录"
-    >
-      <i class="fas fa-arrow-up text-xs"></i>
-    </button>
 
     <!-- 面包屑显示态 -->
     <div
