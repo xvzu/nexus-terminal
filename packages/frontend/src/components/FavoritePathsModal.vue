@@ -353,35 +353,9 @@ onBeforeUnmount(() => {
       class="fixed z-[1001] w-72 md:w-80 rounded-md bg-background shadow-lg border border-border/50 max-h-80 flex flex-col overflow-hidden transition-opacity duration-150"
       :class="isPositioned ? 'opacity-100' : 'opacity-0 pointer-events-none'"
     >
-      <!-- Toolbar: Search and Add Button -->
-      <div class="p-2 flex-shrink-0 flex items-center gap-2">
-        <div class="relative flex-grow">
-          <input
-            ref="searchInputRef"
-            type="text"
-            v-model="searchTerm"
-            :placeholder="t('favoritePaths.searchPlaceholder', 'Search by name or path...')"
-            @keydown="handleSearchKeyDown"
-            class="w-full bg-input border border-border rounded-md pl-2.5 pr-2 py-1.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-          />
-        </div>
-        <button
-          @click="toggleSort"
-          class="flex items-center justify-center w-8 h-8 bg-background border border-border text-text-secondary rounded-lg text-sm cursor-pointer shadow-sm transition-colors duration-200 ease-in-out hover:bg-primary/10 hover:text-primary focus:outline-none flex-shrink-0"
-        >
-          <i :class="sortButtonIcon"></i>
-        </button>
-        <button
-          @click="openAddModal"
-          class="flex items-center justify-center w-8 h-8 bg-primary text-white border-none rounded-lg text-sm font-semibold cursor-pointer shadow-md transition-colors duration-200 ease-in-out hover:bg-button-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary flex-shrink-0"
-          :title="t('favoritePaths.addNew', 'Add new favorite path')"
-        >
-          <i class="fas fa-plus text-base"></i>
-        </button>
-      </div>
 
       <!-- Path List -->
-      <div ref="listContainerRef" class="overflow-y-auto flex-grow p-1 text-sm select-none grid gap-1.5 content-start" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }" @contextmenu.prevent="showBlankContextMenu">
+      <div ref="listContainerRef" class="overflow-y-auto flex-grow p-1 text-sm select-none grid gap-1.5 content-start" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))' }" @contextmenu.prevent="showBlankContextMenu">
         <div v-if="favoritePathsStore.isLoading && filteredPaths.length === 0" class="p-3 text-center text-text-secondary">
           {{ t('favoritePaths.loading', 'Loading favorite paths...') }}
         </div>
@@ -396,7 +370,7 @@ onBeforeUnmount(() => {
           v-for="(favPath, idx) in filteredPaths"
           :key="favPath.id"
           :data-index="idx"
-          class="fav-rand group flex flex-col items-center justify-center p-2 rounded-lg cursor-pointer transition-all duration-150 text-center min-w-0"
+          class="fav-rand group flex flex-col items-center justify-center p-1.5 rounded-lg cursor-pointer transition-all duration-150 text-center min-w-0"
           :class="[
             idx === selectedIndex
               ? 'ring-2 ring-primary'
@@ -428,6 +402,13 @@ onBeforeUnmount(() => {
         >
           <i class="fas fa-plus mr-2 w-4 text-center"></i>
           <span>{{ t('favoritePaths.addNew', '添加收藏') }}</span>
+        </li>
+        <li
+          class="group px-4 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1"
+          @click="toggleSort(); closeFavoriteContextMenu()"
+        >
+          <i class="fas fa-sort text-xs text-text-secondary group-hover:text-primary w-4 text-center"></i>
+          <span>切换排序</span>
         </li>
         <li v-if="favoriteCtxTarget" class="border-t border-border/50 my-1"></li>
         <li
