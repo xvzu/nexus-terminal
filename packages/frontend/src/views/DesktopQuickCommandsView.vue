@@ -19,74 +19,6 @@
 
         <!-- 右侧：指令展示区域 -->
         <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
-          <!-- 右侧顶部文件夹栏 -->
-          <div class="flex items-center justify-between px-3 py-1.5 border-b border-border/40 text-xs flex-shrink-0 bg-background/50">
-            <div class="flex items-center gap-2 truncate min-w-0">
-              <i
-                v-if="sidebarActiveFolderId === 'all'"
-                class="fas fa-layer-group text-primary text-xs flex-shrink-0"
-              ></i>
-              <i
-                v-else-if="sidebarActiveFolderId === 'untagged'"
-                class="fas fa-inbox text-text-secondary text-xs flex-shrink-0"
-              ></i>
-              <i
-                v-else
-                class="fas fa-folder-open text-xs flex-shrink-0 transition-colors"
-                :class="activeSidebarFolderColor ? '' : 'text-amber-400'"
-                :style="activeSidebarFolderColor ? { color: activeSidebarFolderColor } : {}"
-              ></i>
-              <span class="font-semibold text-foreground truncate">{{ activeSidebarFolderName }}</span>
-              <span class="text-text-secondary font-mono text-[11px]">({{ sidebarDisplayCommands.length }})</span>
-
-              <!-- 侧栏过窄时的补充操作按钮组 -->
-              <div
-                v-if="isNarrowSidebar && typeof sidebarActiveFolderId === 'number'"
-                class="flex items-center gap-0.5 ml-2 pl-2 border-l border-border/50"
-              >
-                <!-- 调色板 -->
-                <div class="relative inline-flex items-center">
-                  <button
-                    @click="toggleFolderColorPicker(sidebarActiveFolderId, $event)"
-                    class="w-5 h-5 rounded text-text-secondary hover:text-foreground hover:bg-muted text-[10px] flex items-center justify-center cursor-pointer"
-                    :title="t('folders.folderColor', '文件夹背景颜色')"
-                  >
-                    <i class="fas fa-palette"></i>
-                  </button>
-                  <ColorPickerPopover
-                    :visible="activeFolderColorPickerId === sidebarActiveFolderId"
-                    :trigger-el="activeFolderColorPickerTriggerEl"
-                    :model-value="activeSidebarFolderColor"
-                    @update:model-value="handleUpdateFolderColor(sidebarActiveFolderId, $event)"
-                    @close="activeFolderColorPickerId = null; activeFolderColorPickerTriggerEl = null"
-                  />
-                </div>
-                <!-- 重命名 -->
-                <button
-                  @click="startEditingTag(sidebarActiveFolderId, activeSidebarFolderName)"
-                  class="w-5 h-5 rounded text-text-secondary hover:text-foreground hover:bg-muted text-[10px] flex items-center justify-center cursor-pointer"
-                  :title="t('folders.renameFolder', '重命名文件夹')"
-                >
-                  <i class="fas fa-pencil-alt"></i>
-                </button>
-                <!-- 删除 -->
-                <button
-                  @click="handleDeleteFolder(sidebarActiveFolderId, activeSidebarFolderName, $event)"
-                  class="w-5 h-5 rounded text-text-secondary hover:text-error hover:bg-muted text-[10px] flex items-center justify-center cursor-pointer"
-                  :title="t('folders.deleteFolder', '删除文件夹')"
-                >
-                  <i class="fas fa-trash-alt"></i>
-                </button>
-              </div>
-            </div>
-            <button
-              @click="openAddForm(typeof sidebarActiveFolderId === 'number' ? sidebarActiveFolderId : null)"
-              class="text-xs text-primary hover:text-primary-hover flex items-center gap-1 cursor-pointer font-medium"
-            >
-              <i class="fas fa-plus text-[10px]"></i>
-              <span>{{ t('quickCommands.add', '添加指令') }}</span>
-            </button>
-          </div>
 
           <!-- 右侧指令列表滚动容器 -->
           <div
@@ -126,11 +58,10 @@
                   :key="cmd.id"
                   :data-command-id="cmd.id"
                   class="group flex items-center justify-between cursor-pointer rounded-lg border border-border/50 bg-header/40 hover:bg-primary/10 hover:border-primary/50 transition-all duration-150 select-none overflow-hidden"
-                  :class="{ 'bg-primary/20 border-primary font-medium': isCommandSelected(cmd.id) }"
+                  :class="[{ 'bg-primary/20 border-primary font-medium': isCommandSelected(cmd.id) }, qcRandClass(cmd)]"
                   :style="[
                     { padding: `calc(0.4rem * var(--qc-row-size-multiplier)) calc(0.55rem * var(--qc-row-size-multiplier))` },
-                    getCommandCardStyle(cmd, typeof sidebarActiveFolderId === 'number' ? sidebarActiveFolderId : null),
-                    qcRandClass(cmd)
+                    getCommandCardStyle(cmd, typeof sidebarActiveFolderId === 'number' ? sidebarActiveFolderId : null)
                   ]"
                   @click="handleCommandItemClick(cmd)"
                   @contextmenu.prevent="showQuickCommandContextMenu($event, cmd)"
