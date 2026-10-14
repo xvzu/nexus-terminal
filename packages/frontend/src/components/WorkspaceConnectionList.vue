@@ -94,7 +94,7 @@ const getConnectionItemStyle = (conn: ConnectionInfo, isHighlighted: boolean) =>
   const zoomStyle = {
     paddingTop: `calc(0.25rem * ${m0})`,
     paddingBottom: `calc(0.25rem * ${m0})`,
-    fontSize: `calc(2.1rem * ${Math.max(0.85, m0 * 0.6 + 0.4)})`,
+    fontSize: `calc(1.7rem * ${Math.max(0.85, m0 * 0.6 + 0.4)})`,
     lineHeight: '1.1',
   };
   if (!effectiveColor) return { ...zoomStyle, background: connGradient(conn), color: '#1f2937' };
@@ -109,7 +109,7 @@ const getConnectionItemStyle = (conn: ConnectionInfo, isHighlighted: boolean) =>
     '--conn-item-border': border,
     paddingTop: `calc(0.25rem * ${m})`,
     paddingBottom: `calc(0.25rem * ${m})`,
-    fontSize: `calc(2.1rem * ${Math.max(0.85, m * 0.6 + 0.4)})`,
+    fontSize: `calc(1.7rem * ${Math.max(0.85, m * 0.6 + 0.4)})`,
     lineHeight: '1.1',
   };
 };
