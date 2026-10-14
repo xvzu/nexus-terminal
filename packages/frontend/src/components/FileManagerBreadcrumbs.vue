@@ -435,8 +435,18 @@ defineExpose({
       />
     </div>
 
-    <!-- 右侧工具操作集合（复制路径、收藏夹星标、刷新） -->
+    <!-- 右侧工具操作集合（刷新、收藏夹星标） -->
     <div class="flex items-center gap-1.5 ml-2 flex-shrink-0 text-text-secondary">
+      <!-- 快速刷新当前目录 -->
+      <button
+        type="button"
+        class="flex items-center justify-center w-6 h-6 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 hover:text-foreground active:scale-95 transition-all duration-150"
+        @click.stop="emit('refresh')"
+        :disabled="!isConnected || isLoading"
+        :title="t('fileManager.actions.refresh', '刷新目录')"
+      >
+        <i class="fas fa-sync-alt text-xs" :class="{ 'fa-spin': isLoading }"></i>
+      </button>
 
       <!-- 常用路径收藏夹按钮 -->
       <div class="relative flex-shrink-0">

@@ -301,9 +301,6 @@ export function useFileManagerContextMenu(options: UseFileManagerContextMenuOpti
             { label: t('fileManager.actions.upload'), action: onUpload, disabled: !(isConnected.value && isSftpReady.value) },
             ...(onAddToFavorites ? [{ label: t('fileManager.actions.addCurrentToFavorites', '收藏当前路径'), action: () => onAddToFavorites(), disabled: !(isConnected.value && isSftpReady.value) }] : []),
             // --- 分隔符 (视觉) ---
-            // 3. 刷新
-            { label: t('fileManager.actions.refresh'), action: onRefresh, disabled: !(isConnected.value && isSftpReady.value) },
-            // --- 分隔符 (视觉) ---
             // 4. 顶栏功能（搜索/视图/目录树/终端同步/终端目录/编辑器）
             ...(onToggleSearch ? [{ label: t('fileManager.actions.toggleSearch', '搜索'), action: () => onToggleSearch(), disabled: !isConnected.value }] : []),
             ...(onToggleViewMode ? [{ label: t('fileManager.actions.toggleViewMode', '切换视图'), action: () => onToggleViewMode(), disabled: !isConnected.value }] : []),
