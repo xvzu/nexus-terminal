@@ -70,7 +70,6 @@
                   <div class="flex-1 min-w-0 flex flex-col justify-center gap-0.5 mr-1.5">
                     <div class="flex items-center text-foreground truncate"
                          :style="{ fontSize: `calc(0.82em * max(0.8, var(--qc-row-size-multiplier) * 0.5 + 0.5))` }">
-                      <i class="fas fa-terminal text-primary text-[10px] mr-1.5 flex-shrink-0"></i>
                       <span class="font-medium truncate">{{ cmd.name || cmd.command }}</span>
                     </div>
                     <div v-if="cmd.name && cmd.command"
@@ -115,7 +114,6 @@
                   @contextmenu.prevent="showQuickCommandContextMenu($event, cmd)"
                   :title="getCommandTooltip(cmd)"
                 >
-                  <i class="fas fa-bolt text-amber-500 text-[10px] mr-1.5 flex-shrink-0"></i>
                   <span class="truncate max-w-[220px]">{{ cmd.name || cmd.command }}</span>
                 </div>
               </div>
@@ -313,7 +311,6 @@
                                 <div class="flex-1 min-w-0 flex flex-col justify-center gap-0.5 mr-1.5">
                                     <div class="flex items-center text-foreground truncate"
                                          :style="{ fontSize: `calc(0.82em * max(0.8, var(--qc-row-size-multiplier) * 0.5 + 0.5))` }">
-                                        <i class="fas fa-terminal text-primary text-[10px] mr-1.5 flex-shrink-0"></i>
                                         <span class="font-medium truncate">{{ cmd.name || cmd.command }}</span>
                                     </div>
                                     <div v-if="cmd.name && cmd.command"
@@ -358,7 +355,6 @@
                                 @contextmenu.prevent="showQuickCommandContextMenu($event, cmd)"
                                 :title="getCommandTooltip(cmd)"
                             >
-                                <i class="fas fa-bolt text-amber-500 text-[10px] mr-1.5 flex-shrink-0"></i>
                                 <span class="truncate max-w-[220px]">{{ cmd.name || cmd.command }}</span>
                             </div>
                         </div>
@@ -424,7 +420,6 @@
                         <div class="flex-1 min-w-0 flex flex-col justify-center gap-0.5 mr-1.5">
                             <div class="flex items-center text-foreground truncate"
                                  :style="{ fontSize: `calc(0.82em * max(0.8, var(--qc-row-size-multiplier) * 0.5 + 0.5))` }">
-                                <i class="fas fa-terminal text-primary text-[10px] mr-1.5 flex-shrink-0"></i>
                                 <span class="font-medium truncate">{{ cmd.name || cmd.command }}</span>
                             </div>
                             <div v-if="cmd.name && cmd.command"
@@ -469,7 +464,6 @@
                         @contextmenu.prevent="showQuickCommandContextMenu($event, cmd)"
                         :title="getCommandTooltip(cmd)"
                     >
-                        <i class="fas fa-bolt text-amber-500 text-[10px] mr-1.5 flex-shrink-0"></i>
                         <span class="truncate max-w-[220px]">{{ cmd.name || cmd.command }}</span>
                     </div>
                 </div>
