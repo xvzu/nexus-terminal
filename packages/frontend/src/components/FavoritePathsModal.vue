@@ -408,8 +408,7 @@ onBeforeUnmount(() => {
           @contextmenu.prevent.stop="showFavoriteContextMenu($event, favPath)"
           :title="favPath.path"
         >
-          <span v-if="favPath.name" class="font-bold block truncate w-full text-sm">{{ favPath.name }}</span>
-          <span class="text-[11px] block truncate w-full font-mono fav-path">{{ favPath.path }}</span>
+          <span class="font-bold block truncate w-full text-sm">{{ favPath.name || favPath.path }}</span>
         </div>
         </div>
       </div>
@@ -418,7 +417,7 @@ onBeforeUnmount(() => {
     <!-- 右键菜单 -->
     <div
       v-if="favoriteCtxMenuVisible"
-      class="fixed bg-background border border-border/50 shadow-xl rounded-lg py-1.5 z-[60] min-w-[160px] fav-ctx-menu"
+      class="fixed bg-background border border-border/50 shadow-xl rounded-lg py-1.5 z-[1100] min-w-[160px] fav-ctx-menu"
       :style="{ top: `${favoriteCtxMenuPosition.y}px`, left: `${favoriteCtxMenuPosition.x}px` }"
       @click.stop
     >
