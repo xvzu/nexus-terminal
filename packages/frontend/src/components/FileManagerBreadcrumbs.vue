@@ -376,15 +376,6 @@ defineExpose({
         <template v-for="(seg, idx) in breadcrumbSegments" :key="seg.path">
           <!-- 根目录纯图标按钮 -->
           <template v-if="seg.isRoot">
-            <button
-              type="button"
-              class="flex items-center justify-center w-6 h-6 rounded text-text-secondary hover:text-foreground hover:bg-black/10 dark:hover:bg-white/10 active:scale-95 transition-colors duration-150 flex-shrink-0"
-              :class="{ 'text-foreground bg-black/5 dark:bg-white/5': breadcrumbSegments.length === 1 }"
-              @click.stop="navigateTo('/')"
-              :title="t('fileManager.actions.rootDirectory', '根目录')"
-            >
-              <i class="fas fa-hdd text-xs text-primary/80"></i>
-            </button>
             <!-- 根目录与下一级之间的斜杠按钮（在有子目录时显示） -->
             <button
               v-if="breadcrumbSegments.length > 1"
@@ -457,16 +448,6 @@ defineExpose({
 
     <!-- 右侧工具操作集合（复制路径、收藏夹星标、刷新） -->
     <div class="flex items-center gap-1.5 ml-2 flex-shrink-0 text-text-secondary">
-      <!-- 复制当前路径按钮 -->
-      <button
-        type="button"
-        class="flex items-center justify-center w-6 h-6 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 hover:text-foreground active:scale-95 transition-all duration-150"
-        @click="copyCurrentPath"
-        :title="copySuccess ? '已复制到剪贴板！' : '复制当前路径'"
-      >
-        <i v-if="!copySuccess" class="far fa-copy text-xs"></i>
-        <i v-else class="fas fa-check text-xs text-emerald-500"></i>
-      </button>
 
       <!-- 常用路径收藏夹按钮 -->
       <div class="relative flex-shrink-0">
@@ -489,16 +470,6 @@ defineExpose({
         />
       </div>
 
-      <!-- 快速刷新当前目录 -->
-      <button
-        type="button"
-        class="flex items-center justify-center w-6 h-6 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 hover:text-foreground active:scale-95 transition-all duration-150"
-        @click.stop="emit('refresh')"
-        :disabled="!isConnected || isLoading"
-        :title="t('fileManager.actions.refresh', '刷新目录')"
-      >
-        <i class="fas fa-sync-alt text-xs" :class="{ 'fa-spin': isLoading }"></i>
-      </button>
     </div>
 
     <!-- 斜杠级联下拉菜单浮层 Popover -->

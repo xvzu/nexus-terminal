@@ -61,6 +61,9 @@ export interface UseFileManagerContextMenuOptions {
   onCycleTerminalSync?: () => void; // 顶栏功能入右键菜单：终端同步
   onCdToTerminal?: () => void; // 顶栏功能入右键菜单：终端目录
   onOpenPopupEditor?: () => void; // 顶栏功能入右键菜单：编辑器
+  onGoUp?: () => void; // 面包屑功能入右键菜单：上一级
+  onGoRoot?: () => void; // 面包屑功能入右键菜单：根目录
+  onCopyCurrentPath?: () => void; // 面包屑功能入右键菜单：复制路径
 }
 
 // 辅助函数：检查文件是否为支持的压缩格式
@@ -105,6 +108,9 @@ export function useFileManagerContextMenu(options: UseFileManagerContextMenuOpti
     onCycleTerminalSync,
     onCdToTerminal,
     onOpenPopupEditor,
+    onGoUp,
+    onGoRoot,
+    onCopyCurrentPath,
   } = options;
 
   const contextMenuVisible = ref(false);
@@ -305,6 +311,11 @@ export function useFileManagerContextMenu(options: UseFileManagerContextMenuOpti
             ...(onCycleTerminalSync ? [{ label: t('fileManager.actions.cycleTerminalSync', '终端同步'), action: () => onCycleTerminalSync(), disabled: !isConnected.value }] : []),
             ...(onCdToTerminal ? [{ label: t('fileManager.actions.cdToTerminal', '终端目录'), action: () => onCdToTerminal(), disabled: !isConnected.value }] : []),
             ...(onOpenPopupEditor ? [{ label: t('fileManager.actions.openEditor', '独立编辑器'), action: () => onOpenPopupEditor(), disabled: !isConnected.value }] : []),
+            // --- 分隔符 (视觉) ---
+            // 5. 面包屑功能（上一级/根目录/复制路径）
+            ...(onGoUp ? [{ label: t('fileManager.actions.parentDirectory', '上一级'), action: () => onGoUp(), disabled: !isConnected.value }] : []),
+            ...(onGoRoot ? [{ label: t('fileManager.actions.rootDirectory', '根目录'), action: () => onGoRoot(), disabled: !isConnected.value }] : []),
+            ...(onCopyCurrentPath ? [{ label: t('fileManager.actions.copyPath', '复制路径'), action: () => onCopyCurrentPath(), disabled: !isConnected.value }] : []),
         ];
     } else { // Clicked on '..'
         menu = [

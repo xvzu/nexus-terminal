@@ -10,6 +10,7 @@ import { useSessionStore } from '../stores/session.store';
 import { useSettingsStore } from '../stores/settings.store';
 import { useFocusSwitcherStore } from '../stores/focusSwitcher.store';
 import { useFileManagerContextMenu, type ClipboardState, type CompressFormat } from '../composables/file-manager/useFileManagerContextMenu';
+import { copyToClipboard } from '../utils/clipboard';
 import { useFileManagerSelection } from '../composables/file-manager/useFileManagerSelection';
 import { useFileManagerDragAndDrop } from '../composables/file-manager/useFileManagerDragAndDrop';
 import { useFileManagerKeyboardNavigation } from '../composables/file-manager/useFileManagerKeyboardNavigation';
@@ -1163,6 +1164,21 @@ const {
   onCycleTerminalSync: cycleTerminalSyncMode,
   onCdToTerminal: () => sendCdCommandToTerminal(),
   onOpenPopupEditor: () => openPopupEditor(),
+  onGoUp: () => {
+    const mgr = currentSftpManager.value;
+    if (!mgr) return;
+    const cur = mgr.currentPath.value || '/';
+    if (cur === '/') return;
+    const parts = cur.split('/').filter(Boolean);
+    parts.pop();
+    mgr.loadDirectory('/' + parts.join('/'));
+  },
+  onGoRoot: () => { currentSftpManager.value?.loadDirectory('/'); },
+  onCopyCurrentPath: async () => {
+    const p = currentSftpManager.value?.currentPath.value || '/';
+    const ok = await copyToClipboard(p);
+    if (ok) uiNotificationsStore.showSuccess('已复制到剪贴板');
+  },
   onSetHighlightColor: handleSetHighlightColor, // +++ 传递标记颜色回调 +++
   currentHighlightColor: getItemHighlightColor, // +++ 传递当前颜色获取 +++
 });
