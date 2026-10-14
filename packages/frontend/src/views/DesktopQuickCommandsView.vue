@@ -2,48 +2,6 @@
   <div class="flex flex-col h-full overflow-hidden bg-background">
     <!-- Container for controls and list -->
     <div class="flex flex-col flex-grow overflow-hidden bg-background">
-      <!-- Controls Area -->
-      <div class="flex items-center p-2  flex-shrink-0 gap-2 bg-background"> <!-- Reduced padding p-3 to p-2 -->
-        <input
-          type="text"
-          :placeholder="$t('quickCommands.searchPlaceholder', '搜索名称或指令...')"
-          :value="localSearchTerm"
-          data-focus-id="quickCommandsSearch"
-          @input="updateSearchTerm($event)"
-          @keydown="handleSearchInputKeydown"
-          @blur="handleSearchInputBlur"
-          ref="searchInputRef"
-          class="flex-grow min-w-0 px-4 py-1.5 border border-border/50 rounded-lg bg-input text-foreground text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition duration-150 ease-in-out"
-        />
-        <!-- Sort Button -->
-        <button @click="toggleSortBy" class="w-8 h-8 border border-border/50 rounded-lg text-text-secondary hover:bg-border hover:text-foreground transition-colors duration-150 flex-shrink-0 flex items-center justify-center" :title="sortButtonTitle">
-          <i :class="[sortButtonIcon, 'text-base']"></i>
-        </button>
-        <!-- View Mode Toggle Button (Grid / List / Pills) -->
-        <button @click="cycleViewMode"
-                class="w-8 h-8 border border-border/50 rounded-lg text-text-secondary hover:bg-border hover:text-foreground transition-colors duration-150 flex-shrink-0 flex items-center justify-center cursor-pointer"
-                :class="{ 'bg-primary/20 text-primary border-primary/40': currentViewMode !== 'list' }"
-                :title="viewModeTitle">
-          <i :class="['fas', viewModeIcon, 'text-base']"></i>
-        </button>
-        <!-- Folder Layout Toggle Button (已隐藏：固定平铺) -->
-        <button v-if="false" @click="toggleFolderLayoutMode"
-                class="w-8 h-8 border border-border/50 rounded-lg text-text-secondary hover:bg-border hover:text-foreground transition-colors duration-150 flex-shrink-0 flex items-center justify-center cursor-pointer"
-                :class="{ 'bg-primary/20 text-primary border-primary/40': folderLayoutMode === 'sidebar' }"
-                :title="folderLayoutTitle">
-          <i :class="['fas', folderLayoutMode === 'sidebar' ? 'fa-table-columns' : 'fa-folder-tree', 'text-sm']"></i>
-        </button>
-        <!-- New Folder Button (已隐藏：不用文件夹) -->
-        <button v-if="false" @click="openCreateFolderDialog"
-                class="w-8 h-8 border border-border/50 rounded-lg text-text-secondary hover:bg-border hover:text-foreground transition-colors duration-150 flex-shrink-0 flex items-center justify-center cursor-pointer"
-                :title="t('folders.newFolder', '新建文件夹')">
-          <i class="fas fa-folder-plus text-sm text-amber-400"></i>
-        </button>
-        <!-- Add Button -->
-        <button @click="openAddForm" class="w-8 h-8 bg-primary text-white border-none rounded-lg text-sm font-semibold cursor-pointer shadow-md transition-colors duration-200 ease-in-out hover:bg-button-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary flex-shrink-0 flex items-center justify-center" :title="$t('quickCommands.add', '添加快捷指令')">
-          <i class="fas fa-plus text-base"></i>
-        </button>
-      </div>
       <!-- 1. 侧栏文件夹视图模式 (Sidebar Layout Mode) -->
       <div v-if="folderLayoutMode === 'sidebar'" class="flex flex-row flex-grow overflow-hidden min-h-0 bg-background">
         <!-- 左侧：文件夹导航侧栏（已隐藏：直接平铺全部指令） -->
@@ -135,6 +93,7 @@
             class="flex-grow overflow-y-auto p-2"
             tabindex="0"
             @wheel.ctrl.prevent="handleWheel"
+            @contextmenu.self.prevent="showBlankQuickCommandMenu"
             :style="{ '--qc-row-size-multiplier': quickCommandRowSizeMultiplier }"
           >
             <!-- Loading 状态 -->
@@ -752,6 +711,32 @@
         >
           <i class="fas fa-trash-alt text-xs text-error w-4 text-center"></i>
           <span>{{ t('common.delete', '删除') }}</span>
+        </li>
+      </ul>
+      <ul v-else class="list-none p-0 m-0 mt-1">
+        <!-- 空白区：添加指令 -->
+        <li
+          class="group px-3 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1 gap-2.5"
+          @click="closeQuickCommandContextMenu(); openAddForm(null)"
+        >
+          <i class="fas fa-plus text-xs text-text-secondary group-hover:text-primary w-4 text-center"></i>
+          <span>{{ t('quickCommands.add', '添加快捷指令') }}</span>
+        </li>
+        <!-- 空白区：切换排序 -->
+        <li
+          class="group px-3 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1 gap-2.5"
+          @click="closeQuickCommandContextMenu(); toggleSortBy()"
+        >
+          <i class="fas fa-sort text-xs text-text-secondary group-hover:text-primary w-4 text-center"></i>
+          <span>{{ sortButtonTitle }}</span>
+        </li>
+        <!-- 空白区：切换视图 -->
+        <li
+          class="group px-3 py-1.5 cursor-pointer flex items-center text-foreground hover:bg-primary/10 hover:text-primary text-sm transition-colors duration-150 rounded-md mx-1 gap-2.5"
+          @click="closeQuickCommandContextMenu(); cycleViewMode()"
+        >
+          <i class="fas fa-table-cells text-xs text-text-secondary group-hover:text-primary w-4 text-center"></i>
+          <span>{{ viewModeTitle }}</span>
         </li>
       </ul>
     </div>
@@ -1844,7 +1829,7 @@ let touchStartX = 0;
 let touchStartY = 0;
 const isLongPressActive = ref(false);
 
-const openContextMenuAt = (x: number, y: number, command: QuickCommandFE) => {
+const openContextMenuAt = (x: number, y: number, command: QuickCommandFE | null) => {
   quickCommandContextTargetCommand.value = command;
   quickCommandContextMenuPosition.value = { x, y };
   quickCommandContextMenuVisible.value = true;
@@ -1888,6 +1873,12 @@ const handleCommandItemClick = (cmd: QuickCommandFE) => {
 const showQuickCommandContextMenu = (event: MouseEvent, command: QuickCommandFE) => {
   event.preventDefault();
   openContextMenuAt(event.clientX, event.clientY, command);
+};
+
+// 空白区右键：新建/排序/视图切换
+const showBlankQuickCommandMenu = (event: MouseEvent) => {
+  event.preventDefault();
+  openContextMenuAt(event.clientX, event.clientY, null);
 };
 
 const closeQuickCommandContextMenu = () => {
