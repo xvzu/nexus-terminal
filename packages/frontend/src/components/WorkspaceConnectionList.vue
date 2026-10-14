@@ -1105,7 +1105,7 @@ const cancelEditingTag = () => {
                  @click.right.prevent
                  @contextmenu.prevent="showContextMenu($event, conn)"
                >
-                 <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm font-bold text-center" :title="conn.name || conn.host">
+                 <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow font-bold text-center" :title="conn.name || conn.host">
                    {{ conn.name || conn.host }}
                  </span>
                </li>
@@ -1128,7 +1128,7 @@ const cancelEditingTag = () => {
                 @click.right.prevent
                 @contextmenu.prevent="showContextMenu($event, conn)"
               >
-                <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow text-sm font-bold text-center" :title="conn.name || conn.host">
+                <span class="overflow-hidden text-ellipsis whitespace-nowrap flex-grow font-bold text-center" :title="conn.name || conn.host">
                   {{ conn.name || conn.host }}
                 </span>
               </li>
