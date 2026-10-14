@@ -26,15 +26,15 @@
                 :title="viewModeTitle">
           <i :class="['fas', viewModeIcon, 'text-base']"></i>
         </button>
-        <!-- Folder Layout Toggle Button (Accordion / Sidebar) -->
-        <button @click="toggleFolderLayoutMode"
+        <!-- Folder Layout Toggle Button (已隐藏：固定平铺) -->
+        <button v-if="false" @click="toggleFolderLayoutMode"
                 class="w-8 h-8 border border-border/50 rounded-lg text-text-secondary hover:bg-border hover:text-foreground transition-colors duration-150 flex-shrink-0 flex items-center justify-center cursor-pointer"
                 :class="{ 'bg-primary/20 text-primary border-primary/40': folderLayoutMode === 'sidebar' }"
                 :title="folderLayoutTitle">
           <i :class="['fas', folderLayoutMode === 'sidebar' ? 'fa-table-columns' : 'fa-folder-tree', 'text-sm']"></i>
         </button>
-        <!-- New Folder Button -->
-        <button @click="openCreateFolderDialog"
+        <!-- New Folder Button (已隐藏：不用文件夹) -->
+        <button v-if="false" @click="openCreateFolderDialog"
                 class="w-8 h-8 border border-border/50 rounded-lg text-text-secondary hover:bg-border hover:text-foreground transition-colors duration-150 flex-shrink-0 flex items-center justify-center cursor-pointer"
                 :title="t('folders.newFolder', '新建文件夹')">
           <i class="fas fa-folder-plus text-sm text-amber-400"></i>
@@ -46,142 +46,8 @@
       </div>
       <!-- 1. 侧栏文件夹视图模式 (Sidebar Layout Mode) -->
       <div v-if="folderLayoutMode === 'sidebar'" class="flex flex-row flex-grow overflow-hidden min-h-0 bg-background">
-        <!-- 左侧：文件夹导航侧栏 -->
-        <aside
-          class="border-r border-border/50 flex flex-col flex-shrink-0 overflow-hidden bg-header/20 select-none relative"
-          :style="{ width: `${sidebarWidth}px` }"
-        >
-          <div class="flex-grow overflow-y-auto p-1.5 space-y-0.5">
-            <!-- 全部指令条目 -->
-            <div
-              @click="sidebarActiveFolderId = 'all'"
-              class="flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer text-xs transition-colors duration-150 min-h-[30px]"
-              :class="sidebarActiveFolderId === 'all' ? 'bg-primary/15 text-primary font-semibold' : 'text-foreground/80 hover:text-foreground hover:bg-header/60'"
-            >
-              <div class="flex items-center gap-2 truncate min-w-0 pr-1.5">
-                <i class="fas fa-layer-group text-xs text-primary/80 flex-shrink-0"></i>
-                <span class="truncate">{{ t('quickCommands.allCommands', '全部指令') }}</span>
-              </div>
-              <span class="text-[11px] px-1.5 py-0.2 rounded-full bg-border/40 text-text-secondary font-mono flex-shrink-0">
-                {{ getFolderCommandCount('all') }}
-              </span>
-            </div>
-
-            <!-- 分类文件夹列表 -->
-            <div
-              v-for="folder in quickCommandTagsStore.folders"
-              :key="folder.id"
-              @click="editingTagId !== folder.id ? (sidebarActiveFolderId = folder.id) : null"
-              @contextmenu.prevent="showFolderContextMenu($event, folder)"
-              class="group flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer text-xs transition-colors duration-150 relative min-h-[30px]"
-              :class="sidebarActiveFolderId === folder.id ? 'bg-primary/15 text-primary font-semibold' : 'text-foreground/80 hover:text-foreground hover:bg-header/60'"
-              :title="folder.name"
-            >
-              <!-- 编辑状态 -->
-              <input
-                v-if="editingTagId === folder.id"
-                :key="`sidebar-folder-${folder.id}`"
-                :ref="(el) => setTagInputRef(el, folder.id)"
-                type="text"
-                v-model="editedTagName"
-                class="bg-input border border-primary rounded px-1.5 py-0.5 w-full text-xs text-foreground focus:outline-none"
-                @blur="finishEditingTag"
-                @keydown.enter.prevent="finishEditingTag"
-                @keydown.esc.prevent="cancelEditingTag"
-                @click.stop
-              />
-              <!-- 正常展示状态 -->
-              <template v-else>
-                <div class="flex items-center gap-2 truncate min-w-0 flex-1 pr-1.5">
-                  <i
-                    class="fas fa-folder text-xs flex-shrink-0 transition-colors"
-                    :class="folder.background_color ? '' : 'text-amber-400'"
-                    :style="folder.background_color ? { color: folder.background_color } : {}"
-                  ></i>
-                  <span class="truncate">{{ folder.name }}</span>
-                </div>
-
-                <!-- 右侧容器：宽侧栏时hover渐变显示3个按钮；窄侧栏时只显示数字角标，绝不与文本重叠！ -->
-                <div class="flex items-center justify-end flex-shrink-0 relative min-w-[20px]" @click.stop>
-                  <!-- 数量角标 (过窄时常驻且不淡出；宽侧栏时hover淡出) -->
-                  <span
-                    class="text-[11px] px-1.5 py-0.2 rounded-full bg-border/40 text-text-secondary font-mono flex-shrink-0 transition-opacity duration-150"
-                    :class="{ 'group-hover:opacity-0 group-hover:pointer-events-none': !isNarrowSidebar }"
-                  >
-                    {{ getFolderCommandCount(folder.id) }}
-                  </span>
-
-                  <!-- 悬浮操作按钮 (仅在非过窄模式下提供 hover 显示，过窄模式完全不渲染，避免文本重叠) -->
-                  <div
-                    v-if="!isNarrowSidebar"
-                    class="absolute right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto bg-inherit rounded-md"
-                  >
-                    <!-- 调色板 -->
-                    <div class="relative inline-flex items-center" @click.stop>
-                      <button
-                        @click.stop="toggleFolderColorPicker(folder.id, $event)"
-                        class="w-5 h-5 p-0 rounded text-text-secondary hover:text-foreground hover:bg-muted text-[10px] flex items-center justify-center cursor-pointer"
-                        :title="t('folders.folderColor', '文件夹背景颜色')"
-                      >
-                        <i class="fas fa-palette"></i>
-                      </button>
-                      <ColorPickerPopover
-                        :visible="activeFolderColorPickerId === folder.id"
-                        :trigger-el="activeFolderColorPickerTriggerEl"
-                        :model-value="folder.background_color || null"
-                        @update:model-value="handleUpdateFolderColor(folder.id, $event)"
-                        @close="activeFolderColorPickerId = null; activeFolderColorPickerTriggerEl = null"
-                      />
-                    </div>
-                    <!-- 重命名 -->
-                    <button
-                      @click.stop="startEditingTag(folder.id, folder.name)"
-                      class="w-5 h-5 p-0 rounded text-text-secondary hover:text-foreground hover:bg-muted text-[10px] flex items-center justify-center cursor-pointer"
-                      :title="t('folders.renameFolder', '重命名文件夹')"
-                    >
-                      <i class="fas fa-pencil-alt"></i>
-                    </button>
-                    <!-- 删除 -->
-                    <button
-                      @click.stop="handleDeleteFolder(folder.id, folder.name, $event)"
-                      class="w-5 h-5 p-0 rounded text-text-secondary hover:text-error hover:bg-muted text-[10px] flex items-center justify-center cursor-pointer"
-                      :title="t('folders.deleteFolder', '删除文件夹')"
-                    >
-                      <i class="fas fa-trash-alt"></i>
-                    </button>
-                  </div>
-                </div>
-              </template>
-            </div>
-
-            <!-- 未分类文件夹 -->
-            <div
-              v-if="getFolderCommandCount('untagged') > 0"
-              @click="sidebarActiveFolderId = 'untagged'"
-              class="flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer text-xs transition-colors duration-150 min-h-[30px]"
-              :class="sidebarActiveFolderId === 'untagged' ? 'bg-primary/15 text-primary font-semibold' : 'text-foreground/80 hover:text-foreground hover:bg-header/60'"
-            >
-              <div class="flex items-center gap-2 truncate min-w-0 pr-1.5">
-                <i class="fas fa-inbox text-xs text-text-secondary flex-shrink-0"></i>
-                <span class="truncate">{{ t('quickCommands.untagged', '未分类') }}</span>
-              </div>
-              <span class="text-[11px] px-1.5 py-0.2 rounded-full bg-border/40 text-text-secondary font-mono flex-shrink-0">
-                {{ getFolderCommandCount('untagged') }}
-              </span>
-            </div>
-          </div>
-
-          <!-- 侧栏底部：新建文件夹快捷入口 -->
-          <div class="p-1.5 border-t border-border/40 flex-shrink-0">
-            <button
-              @click="openCreateFolderDialog"
-              class="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 text-xs text-text-secondary hover:text-foreground hover:bg-header/60 rounded-lg border border-dashed border-border/60 transition-colors cursor-pointer"
-            >
-              <i class="fas fa-folder-plus text-amber-400 text-xs"></i>
-              <span>{{ t('folders.newFolder', '新建文件夹') }}</span>
-            </button>
-          </div>
-        </aside>
+        <!-- 左侧：文件夹导航侧栏（已隐藏：直接平铺全部指令） -->
+        <!-- 文件夹侧栏已移除：直接平铺全部指令 -->
 
         <!-- 侧栏拖拽调整宽度手柄 -->
         <div
@@ -304,7 +170,8 @@
                   :class="{ 'bg-primary/20 border-primary font-medium': isCommandSelected(cmd.id) }"
                   :style="[
                     { padding: `calc(0.4rem * var(--qc-row-size-multiplier)) calc(0.55rem * var(--qc-row-size-multiplier))` },
-                    getCommandCardStyle(cmd, typeof sidebarActiveFolderId === 'number' ? sidebarActiveFolderId : null)
+                    getCommandCardStyle(cmd, typeof sidebarActiveFolderId === 'number' ? sidebarActiveFolderId : null),
+                    qcRandClass(cmd)
                   ]"
                   @click="handleCommandItemClick(cmd)"
                   @contextmenu.prevent="showQuickCommandContextMenu($event, cmd)"
@@ -346,7 +213,7 @@
                   :key="cmd.id"
                   :data-command-id="cmd.id"
                   class="group inline-flex items-center cursor-pointer rounded-md border border-border/50 bg-header/40 hover:bg-primary/15 hover:border-primary/50 hover:text-primary text-foreground transition-all duration-150 select-none"
-                  :class="{ 'bg-primary/25 border-primary text-primary font-medium': isCommandSelected(cmd.id) }"
+                  :class="[{ 'bg-primary/25 border-primary text-primary font-medium': isCommandSelected(cmd.id) }, qcRandClass(cmd)]"
                   :style="[
                     {
                       padding: `calc(0.2rem * var(--qc-row-size-multiplier)) calc(0.55rem * var(--qc-row-size-multiplier))`,
@@ -374,7 +241,7 @@
                     { padding: `calc(0.625rem * var(--qc-row-size-multiplier)) calc(0.75rem * var(--qc-row-size-multiplier))` },
                     getCommandCardStyle(cmd, typeof sidebarActiveFolderId === 'number' ? sidebarActiveFolderId : null)
                   ]"
-                  :class="{ 'bg-primary/20 font-medium': isCommandSelected(cmd.id) }"
+                  :class="[{ 'bg-primary/20 font-medium': isCommandSelected(cmd.id) }, qcRandClass(cmd)]"
                   @click="handleCommandItemClick(cmd)"
                   @contextmenu.prevent="showQuickCommandContextMenu($event, cmd)"
                 >
@@ -589,7 +456,7 @@
                                 :key="cmd.id"
                                 :data-command-id="cmd.id"
                                 class="group inline-flex items-center cursor-pointer rounded-md border border-border/50 bg-header/40 hover:bg-primary/15 hover:border-primary/50 hover:text-primary text-foreground transition-all duration-150 select-none"
-                                :class="{ 'bg-primary/25 border-primary text-primary font-medium': isCommandSelected(cmd.id) }"
+                                :class="[{ 'bg-primary/25 border-primary text-primary font-medium': isCommandSelected(cmd.id) }, qcRandClass(cmd)]"
                                 :style="[
                                     {
                                         padding: `calc(0.2rem * var(--qc-row-size-multiplier)) calc(0.55rem * var(--qc-row-size-multiplier))`,
@@ -617,7 +484,7 @@
                                     { padding: `calc(0.625rem * var(--qc-row-size-multiplier)) calc(0.75rem * var(--qc-row-size-multiplier))` },
                                     getCommandCardStyle(cmd, groupData.tagId)
                                 ]"
-                                :class="{ 'bg-primary/20 font-medium': isCommandSelected(cmd.id) }"
+                                :class="[{ 'bg-primary/20 font-medium': isCommandSelected(cmd.id) }, qcRandClass(cmd)]"
                                 @click="handleCommandItemClick(cmd)"
                                 @contextmenu.prevent="showQuickCommandContextMenu($event, cmd)"
                             >
@@ -700,7 +567,7 @@
                         :key="cmd.id"
                         :data-command-id="cmd.id"
                         class="group inline-flex items-center cursor-pointer rounded-md border border-border/50 bg-header/40 hover:bg-primary/15 hover:border-primary/50 hover:text-primary text-foreground transition-all duration-150 select-none"
-                        :class="{ 'bg-primary/25 border-primary text-primary font-medium': isCommandSelected(cmd.id) }"
+                        :class="[{ 'bg-primary/25 border-primary text-primary font-medium': isCommandSelected(cmd.id) }, qcRandClass(cmd)]"
                         :style="[
                             {
                                 padding: `calc(0.2rem * var(--qc-row-size-multiplier)) calc(0.55rem * var(--qc-row-size-multiplier))`,
@@ -728,7 +595,7 @@
                             { padding: `calc(0.625rem * var(--qc-row-size-multiplier)) calc(0.75rem * var(--qc-row-size-multiplier))` },
                             getCommandCardStyle(cmd, null)
                         ]"
-                        :class="{ 'bg-primary/20 font-medium': isCommandSelected(cmd.id) }"
+                        :class="[{ 'bg-primary/20 font-medium': isCommandSelected(cmd.id) }, qcRandClass(cmd)]"
                         @click="handleCommandItemClick(cmd)"
                         @contextmenu.prevent="showQuickCommandContextMenu($event, cmd)"
                     >
@@ -1060,10 +927,37 @@ const getCommandFolderColor = (cmd: QuickCommandFE, groupTagId?: number | null):
   return null;
 };
 
+const QC_GRADIENT_PAIRS: Array<[string, string]> = [
+  ['#bfdbfe', '#e9d5ff'],
+  ['#bbf7d0', '#fef6d5'],
+  ['#fecaca', '#fde68a'],
+  ['#bae6fd', '#c7d2fe'],
+  ['#fbcfe8', '#ddd6fe'],
+  ['#a7f3d0', '#fef9c3'],
+  ['#fed7aa', '#fecdd3'],
+  ['#ddd6fe', '#bfdbfe'],
+  ['#fecdd3', '#fef6d5'],
+  ['#c7d2fe', '#bbf7d0'],
+];
+const qcGradientCache = new Map<number, string>();
+const qcRandClass = (cmd: QuickCommandFE): string => {
+  const folderColor = getCommandFolderColor(cmd, null);
+  const effectiveColor = resolveEffectiveColor(cmd.background_color, folderColor);
+  return effectiveColor ? '' : 'qc-rand';
+};
+const qcGradient = (cmd: QuickCommandFE): string => {
+  const hit = qcGradientCache.get(cmd.id);
+  if (hit) return hit;
+  const pair = QC_GRADIENT_PAIRS[Math.floor(Math.random() * QC_GRADIENT_PAIRS.length)];
+  const g = `linear-gradient(135deg, ${pair[0]}, ${pair[1]})`;
+  qcGradientCache.set(cmd.id, g);
+  return g;
+};
+
 const getCommandCardStyle = (cmd: QuickCommandFE, groupTagId?: number | null) => {
   const folderColor = getCommandFolderColor(cmd, groupTagId);
   const effectiveColor = resolveEffectiveColor(cmd.background_color, folderColor);
-  if (!effectiveColor) return {};
+  if (!effectiveColor) return { background: qcGradient(cmd) };
   return getItemColoredCardStyle(effectiveColor, { alpha: 0.14, borderAlpha: 0.35 });
 };
 
@@ -1305,17 +1199,7 @@ export type FolderLayoutMode = 'accordion' | 'sidebar';
 const storageFolderLayoutKey = computed(() => `qc_folder_layout:${platform.value}:${props.instanceId || 'default'}`);
 
 const getInitialFolderLayoutMode = (): FolderLayoutMode => {
-  const saved = componentStateStore.getState<FolderLayoutMode>(storageFolderLayoutKey.value, 'accordion');
-  if (saved && (saved === 'accordion' || saved === 'sidebar')) {
-    return saved;
-  }
-  try {
-    const local = localStorage.getItem('nexus:qc_folder_layout_mode');
-    if (local === 'accordion' || local === 'sidebar') {
-      return local as FolderLayoutMode;
-    }
-  } catch (_) {}
-  return 'accordion';
+  return 'sidebar';
 };
 
 const folderLayoutMode = ref<FolderLayoutMode>(getInitialFolderLayoutMode());
@@ -2144,6 +2028,12 @@ const handleMoveCommandToFolder = async (command: QuickCommandFE, folderId: numb
   grid-template-columns: repeat(auto-fill, minmax(calc(170px * var(--qc-row-size-multiplier, 1)), 1fr));
   gap: calc(0.45rem * var(--qc-row-size-multiplier, 1));
 }
+
+/* 随机渐变卡片深色文字兜底 */
+.qc-rand .text-foreground,
+.qc-rand .text-text-secondary { color: #1f2937 !important; }
+.qc-rand .text-primary,
+.qc-rand:hover .text-primary { color: #3730a3 !important; }
 
 /* 药丸胶囊流容器 (纯布局响应式) */
 .qc-pill-container {
