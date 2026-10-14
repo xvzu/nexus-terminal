@@ -55,6 +55,12 @@ export interface UseFileManagerContextMenuOptions {
   onAddToFavorites?: (item?: FileListItem) => void; // +++ 添加到常用路径回调 +++
   onSetHighlightColor?: (item: FileListItem, color: string | null) => void; // +++ 标记颜色回调 +++
   currentHighlightColor?: (item: FileListItem) => string | undefined; // +++ 当前颜色获取 +++
+  onToggleSearch?: () => void; // 顶栏功能入右键菜单：搜索
+  onToggleViewMode?: () => void; // 顶栏功能入右键菜单：视图
+  onToggleDirectoryTree?: () => void; // 顶栏功能入右键菜单：目录树
+  onCycleTerminalSync?: () => void; // 顶栏功能入右键菜单：终端同步
+  onCdToTerminal?: () => void; // 顶栏功能入右键菜单：终端目录
+  onOpenPopupEditor?: () => void; // 顶栏功能入右键菜单：编辑器
 }
 
 // 辅助函数：检查文件是否为支持的压缩格式
@@ -93,6 +99,12 @@ export function useFileManagerContextMenu(options: UseFileManagerContextMenuOpti
     onAddToFavorites, // +++ 解构添加到常用路径回调 +++
     onSetHighlightColor, // +++ 解构标记颜色回调 +++
     currentHighlightColor, // +++ 解构当前颜色获取 +++
+    onToggleSearch,
+    onToggleViewMode,
+    onToggleDirectoryTree,
+    onCycleTerminalSync,
+    onCdToTerminal,
+    onOpenPopupEditor,
   } = options;
 
   const contextMenuVisible = ref(false);
@@ -285,6 +297,14 @@ export function useFileManagerContextMenu(options: UseFileManagerContextMenuOpti
             // --- 分隔符 (视觉) ---
             // 3. 刷新
             { label: t('fileManager.actions.refresh'), action: onRefresh, disabled: !(isConnected.value && isSftpReady.value) },
+            // --- 分隔符 (视觉) ---
+            // 4. 顶栏功能（搜索/视图/目录树/终端同步/终端目录/编辑器）
+            ...(onToggleSearch ? [{ label: t('fileManager.actions.toggleSearch', '搜索'), action: () => onToggleSearch(), disabled: !isConnected.value }] : []),
+            ...(onToggleViewMode ? [{ label: t('fileManager.actions.toggleViewMode', '切换视图'), action: () => onToggleViewMode(), disabled: !isConnected.value }] : []),
+            ...(onToggleDirectoryTree ? [{ label: t('fileManager.actions.toggleDirectoryTree', '目录树'), action: () => onToggleDirectoryTree(), disabled: !isConnected.value }] : []),
+            ...(onCycleTerminalSync ? [{ label: t('fileManager.actions.cycleTerminalSync', '终端同步'), action: () => onCycleTerminalSync(), disabled: !isConnected.value }] : []),
+            ...(onCdToTerminal ? [{ label: t('fileManager.actions.cdToTerminal', '终端目录'), action: () => onCdToTerminal(), disabled: !isConnected.value }] : []),
+            ...(onOpenPopupEditor ? [{ label: t('fileManager.actions.openEditor', '独立编辑器'), action: () => onOpenPopupEditor(), disabled: !isConnected.value }] : []),
         ];
     } else { // Clicked on '..'
         menu = [

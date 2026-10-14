@@ -1157,6 +1157,12 @@ const {
   onDecompressRequest: handleDecompress,
   onCopyPath: handleCopyPath, // +++ 传递复制路径回调 +++
   onAddToFavorites: handleAddToFavorites, // +++ 传递添加到常用路径回调 +++
+  onToggleSearch: () => { isSearchActive.value = !isSearchActive.value; },
+  onToggleViewMode: toggleViewMode,
+  onToggleDirectoryTree: toggleDirectoryTree,
+  onCycleTerminalSync: cycleTerminalSyncMode,
+  onCdToTerminal: () => sendCdCommandToTerminal(),
+  onOpenPopupEditor: () => openPopupEditor(),
   onSetHighlightColor: handleSetHighlightColor, // +++ 传递标记颜色回调 +++
   currentHighlightColor: getItemHighlightColor, // +++ 传递当前颜色获取 +++
 });
