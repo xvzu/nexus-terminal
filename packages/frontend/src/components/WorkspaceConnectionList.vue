@@ -77,12 +77,14 @@ const GRADIENT_PAIRS: Array<[string, string]> = [
   ['#fecdd3', '#fef6d5'],
   ['#c7d2fe', '#bbf7d0'],
 ];
+const gradientCache = new Map<number, string>();
 const connGradient = (conn: ConnectionInfo): string => {
-  let h = 0;
-  const s = String(conn.id);
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  const pair = GRADIENT_PAIRS[h % GRADIENT_PAIRS.length];
-  return `linear-gradient(135deg, ${pair[0]}, ${pair[1]})`;
+  const hit = gradientCache.get(conn.id);
+  if (hit) return hit;
+  const pair = GRADIENT_PAIRS[Math.floor(Math.random() * GRADIENT_PAIRS.length)];
+  const g = `linear-gradient(135deg, ${pair[0]}, ${pair[1]})`;
+  gradientCache.set(conn.id, g);
+  return g;
 };
 
 // 计算带背景颜色的连接项样式
