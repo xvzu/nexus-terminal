@@ -370,7 +370,7 @@
                   <div class="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
                     <i class="fas fa-terminal text-xs"></i>
                   </div>
-                  <h4 class="text-xs font-semibold text-foreground truncate">
+                  <h4 class="text-xs font-bold text-foreground truncate">
                     {{ cmd.name || cmd.command }}
                   </h4>
                 </div>
@@ -517,7 +517,7 @@
               </div>
               <div class="flex flex-col min-w-0 flex-1">
                 <div class="flex items-center gap-2">
-                  <span class="text-xs font-semibold text-foreground truncate">
+                  <span class="text-xs font-bold text-foreground truncate">
                     {{ cmd.name || cmd.command }}
                   </span>
                   <span v-if="getCommandFolderName(cmd)" class="text-[10px] px-1.5 py-0.2 rounded bg-muted text-text-secondary font-medium truncate max-w-[120px]">
