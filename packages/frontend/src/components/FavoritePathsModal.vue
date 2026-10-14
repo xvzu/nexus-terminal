@@ -134,6 +134,28 @@ const handleItemClick = async (pathItem: FavoritePathItem) => {
   closeModal();
 };
 
+const FAV_GRADIENT_PAIRS: Array<[string, string]> = [
+  ['#bfdbfe', '#e9d5ff'],
+  ['#bbf7d0', '#fef6d5'],
+  ['#fecaca', '#fde68a'],
+  ['#bae6fd', '#c7d2fe'],
+  ['#fbcfe8', '#ddd6fe'],
+  ['#a7f3d0', '#fef9c3'],
+  ['#fed7aa', '#fecdd3'],
+  ['#ddd6fe', '#bfdbfe'],
+  ['#fecdd3', '#fef6d5'],
+  ['#c7d2fe', '#bbf7d0'],
+];
+const favGradientCache = new Map<string | number, string>();
+const favGradient = (favPath: FavoritePathItem): string => {
+  const hit = favGradientCache.get(favPath.id);
+  if (hit) return hit;
+  const pair = FAV_GRADIENT_PAIRS[Math.floor(Math.random() * FAV_GRADIENT_PAIRS.length)];
+  const g = `linear-gradient(135deg, ${pair[0]}, ${pair[1]})`;
+  favGradientCache.set(favPath.id, g);
+  return g;
+};
+
 const openAddModal = () => {
   editingPathItem.value = null;
   showAddEditModal.value = true;
@@ -359,7 +381,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Path List -->
-      <div ref="listContainerRef" class="overflow-y-auto flex-grow p-1 text-sm select-none" @contextmenu.prevent="showBlankContextMenu">
+      <div ref="listContainerRef" class="overflow-y-auto flex-grow p-1 text-sm select-none grid gap-1.5 content-start" :style="{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }" @contextmenu.prevent="showBlankContextMenu">
         <div v-if="favoritePathsStore.isLoading && filteredPaths.length === 0" class="p-3 text-center text-text-secondary">
           {{ t('favoritePaths.loading', 'Loading favorite paths...') }}
         </div>
@@ -368,39 +390,27 @@ onBeforeUnmount(() => {
         </div>
         <div
           v-else
+          class="contents"
+        >
+        <div
           v-for="(favPath, idx) in filteredPaths"
           :key="favPath.id"
           :data-index="idx"
-          class="group flex items-center justify-between p-1.5 rounded cursor-pointer transition-colors duration-150 text-foreground"
+          class="fav-rand group flex flex-col items-center justify-center p-2 rounded-lg cursor-pointer transition-all duration-150 text-center min-w-0"
           :class="[
             idx === selectedIndex
-              ? 'bg-primary/15'
-              : 'hover:bg-primary/10'
+              ? 'ring-2 ring-primary'
+              : ''
           ]"
+          :style="{ background: favGradient(favPath) }"
           @click="handleItemClick(favPath)"
           @mouseenter="selectedIndex = idx"
           @contextmenu.prevent.stop="showFavoriteContextMenu($event, favPath)"
+          :title="favPath.path"
         >
-          <div class="truncate flex-grow mr-2">
-            <span v-if="favPath.name" class="font-medium block truncate text-foreground">{{ favPath.name }}</span>
-            <span class="text-xs text-text-secondary block truncate font-normal">{{ favPath.path }}</span>
-          </div>
-          <div class="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              @click.stop="openEditModal(favPath)"
-              class="p-1 text-text-secondary hover:text-primary rounded"
-              :title="t('common.edit')"
-            >
-              <i class="fas fa-edit text-xs"></i>
-            </button>
-            <button
-              @click.stop="handleDelete(favPath)"
-              class="p-1 text-text-secondary hover:text-red-500 rounded"
-              :title="t('common.delete')"
-            >
-              <i class="fas fa-trash-alt text-xs"></i>
-            </button>
-          </div>
+          <span v-if="favPath.name" class="font-bold block truncate w-full text-sm">{{ favPath.name }}</span>
+          <span class="text-[11px] block truncate w-full font-mono fav-path">{{ favPath.path }}</span>
+        </div>
         </div>
       </div>
     </div>
@@ -450,3 +460,8 @@ onBeforeUnmount(() => {
     />
   </Teleport>
 </template>
+
+<style scoped>
+.fav-rand, .fav-rand .fav-path { color: #1f2937 !important; }
+.fav-rand span:first-child { color: #111827 !important; }
+</style>
