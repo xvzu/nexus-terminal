@@ -100,9 +100,8 @@
                 <li
                   v-for="connection in group.connections"
                   :key="connection.id"
-                  class="send-rand flex items-center p-2.5 rounded-md cursor-pointer transition-colors duration-150"
-                  :class="{ 'ring-2 ring-primary': selectedConnectionIds.includes(connection.id) }"
-                  :style="{ background: sendGradient(connection.id) }"
+                  class="flex items-center p-2.5 rounded-md hover:bg-primary/10 cursor-pointer transition-colors duration-150"
+                  :class="{'bg-primary/20': selectedConnectionIds.includes(connection.id)}"
                   @click="toggleIndividualConnectionSelection(connection.id)"
                 >
                   <input
@@ -113,7 +112,8 @@
                     class="mr-3 h-4 w-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-0"
                     @click.stop
                   />
-                  <span class="text-sm font-bold truncate flex-grow" :title="connection.name">{{ connection.name }}</span>
+                  <i :class="getConnectionIconClass(connection.type) + ' mr-2.5 w-4 text-center text-text-secondary'"></i>
+                  <span class="text-sm truncate flex-grow" :title="connection.name">{{ connection.name }}</span>
                 </li>
               </ul>
             </div>
@@ -152,10 +152,6 @@
     </div>
   </div>
 </template>
-
-<style scoped>
-.send-rand, .send-rand span { color: #1f2937 !important; }
-</style>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
@@ -204,29 +200,6 @@ const searchTerm = ref('');
 const targetPath = ref('');
 const transferMethod = ref<'auto' | 'rsync' | 'scp'>('auto');
 const selectedConnectionIds = ref<number[]>([]);
-
-// 选择列表随机渐变底（与工作台宫格同语言）
-const SEND_GRADIENT_PAIRS: Array<[string, string]> = [
-  ['#bfdbfe', '#e9d5ff'],
-  ['#bbf7d0', '#fef6d5'],
-  ['#fecaca', '#fde68a'],
-  ['#bae6fd', '#c7d2fe'],
-  ['#fbcfe8', '#ddd6fe'],
-  ['#a7f3d0', '#fef9c3'],
-  ['#fed7aa', '#fecdd3'],
-  ['#ddd6fe', '#bfdbfe'],
-  ['#fecdd3', '#fef6d5'],
-  ['#c7d2fe', '#bbf7d0'],
-];
-const sendGradientCache = new Map<number, string>();
-const sendGradient = (id: number): string => {
-  const hit = sendGradientCache.get(id);
-  if (hit) return hit;
-  const pair = SEND_GRADIENT_PAIRS[Math.floor(Math.random() * SEND_GRADIENT_PAIRS.length)];
-  const g = `linear-gradient(135deg, ${pair[0]}, ${pair[1]})`;
-  sendGradientCache.set(id, g);
-  return g;
-};
 const isSending = ref(false);
 
 const isLoadingConnections = ref(false);
