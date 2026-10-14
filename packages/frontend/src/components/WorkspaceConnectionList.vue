@@ -130,7 +130,7 @@ const { showConfirmDialog } = useConfirmDialog();
 
 const { connections, isLoading: connectionsLoading, error: connectionsError } = storeToRefs(connectionsStore);
 const { tags, isLoading: tagsLoading, error: tagsError } = storeToRefs(tagsStore);
-const { showConnectionTagsBoolean } = storeToRefs(settingsStore); // 获取设置项
+const showConnectionTagsBoolean = ref(false); // 本组件固定平铺：去掉分类/未标记分组
 
 // 搜索词
 const searchTerm = ref('');
